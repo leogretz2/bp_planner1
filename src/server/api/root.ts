@@ -1,4 +1,4 @@
-import { postRouter } from "import-alias/server/api/routers/post";
+import { postRouter } from "import-alias/server/api/routers/_post_example";
 import {
   createCallerFactory,
   createTRPCRouter,
