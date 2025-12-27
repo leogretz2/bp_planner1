@@ -4,7 +4,9 @@ import { env } from "import-alias/env";
 
 export default {
   schema: "./src/server/db/schema.ts",
+  out: "./migrations",
   dialect: "postgresql",
+  // driver: "pg",
   dbCredentials: {
     url: env.DATABASE_URL,
   },
