@@ -1,16 +1,18 @@
 // src/server/db/schema.ts
 // Drizzle ORM schema for planner app
 import {
-  pgTable,
-  text,
-  uuid,
-  timestamp,
-  numeric,
+  boolean,
   date,
-  uniqueIndex,
   integer,
-  serial,
+  jsonb,
+  numeric,
+  pgTable,
   primaryKey,
+  serial,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -121,7 +123,7 @@ export const work_logs = pgTable("work_logs", {
 export const notifications = pgTable("notifications", {
   id: uuid("id").defaultRandom().primaryKey(),
   user_id: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
-  payload: text("payload").notNull(), // you can switch this to jsonb if needed
-  sent: text("sent").default("false"),
+  payload: jsonb("payload").notNull(), // you can switch this to jsonb if needed
+  sent: boolean("sent").default(false),
   created_at: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });

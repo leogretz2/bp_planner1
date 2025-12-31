@@ -1,5 +1,5 @@
 {
-  "id": "2e7382a1-a7d4-41ed-9b32-f0d9f8e1979a",
+  "id": "144f3df8-dbe2-41d8-aeea-d726369b7048",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -23,16 +23,16 @@
         },
         "payload": {
           "name": "payload",
-          "type": "text",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true
         },
         "sent": {
           "name": "sent",
-          "type": "text",
+          "type": "boolean",
           "primaryKey": false,
           "notNull": false,
-          "default": "'false'"
+          "default": false
         },
         "created_at": {
           "name": "created_at",

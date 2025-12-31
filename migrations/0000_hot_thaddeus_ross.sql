@@ -1,8 +1,8 @@
 CREATE TABLE "notifications" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid,
-	"payload" text NOT NULL,
-	"sent" text DEFAULT 'false',
+	"payload" jsonb NOT NULL,
+	"sent" boolean DEFAULT false,
 	"created_at" timestamp with time zone DEFAULT now()
 );
 --> statement-breakpoint

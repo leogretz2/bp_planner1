@@ -3,6 +3,7 @@
  * Database seed script
  * Run with: pnpm db:seed
  */
+import "dotenv/config"; // Load .env file before importing anything else
 import { db } from "./index";
 import { users, pods, projects, tasks, tags, task_assignments, task_tags } from "./schema";
 
