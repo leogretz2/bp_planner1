@@ -61,7 +61,7 @@ async function seed() {
 
     // 3. Create projects
     console.log("Creating projects...");
-    const [project1, project2, project3] = await db
+    const [project1, project2] = await db
       .insert(projects)
       .values([
         {
@@ -95,7 +95,7 @@ async function seed() {
 
     // 4. Create tags
     console.log("Creating tags...");
-    const [bugTag, featureTag, docTag, urgentTag] = await db
+    const [, featureTag, docTag, urgentTag] = await db
       .insert(tags)
       .values([
         { slug: "bug", label: "Bug" },
@@ -109,7 +109,7 @@ async function seed() {
 
     // 5. Create tasks
     console.log("Creating tasks...");
-    const [task1, task2, task3, task4, task5, task6] = await db
+    const [task1, task2, task3, task4, , task6] = await db
       .insert(tasks)
       .values([
         {

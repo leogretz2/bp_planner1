@@ -8,10 +8,8 @@ import {
   numeric,
   pgTable,
   primaryKey,
-  serial,
   text,
   timestamp,
-  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 

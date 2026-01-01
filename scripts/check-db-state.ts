@@ -53,9 +53,9 @@ async function checkDatabaseState() {
     if (tables.length > 0 && tables.some(t => t.table_name === 'users')) {
       console.log("\n📈 Record counts:");
       const counts = await Promise.all([
-        sql`SELECT COUNT(*) as count FROM users`.then(r => ({ table: 'users', count: r[0].count })),
-        sql`SELECT COUNT(*) as count FROM projects`.then(r => ({ table: 'projects', count: r[0].count })),
-        sql`SELECT COUNT(*) as count FROM tasks`.then(r => ({ table: 'tasks', count: r[0].count })),
+        sql`SELECT COUNT(*) as count FROM users`.then(r => ({ table: 'users', count: r[0]?.count ?? 0 })),
+        sql`SELECT COUNT(*) as count FROM projects`.then(r => ({ table: 'projects', count: r[0]?.count ?? 0 })),
+        sql`SELECT COUNT(*) as count FROM tasks`.then(r => ({ table: 'tasks', count: r[0]?.count ?? 0 })),
       ]);
       counts.forEach(({ table, count }) => {
         console.log(`  ${table}: ${count} records`);
