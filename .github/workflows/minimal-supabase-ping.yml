@@ -1,0 +1,65 @@
+name: Minimal Ping Supabase to Prevent Pausing
+
+on:
+  schedule:
+    - cron: "0 10 * * 2,5"   # 10:00 UTC every Tue & Fri
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Ping Supabase with curl
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_KEY:-}" ]; then
+            echo "Missing SUPABASE_URL or SUPABASE_KEY environment variable (set in repository secrets)"
+            exit 2
+          fi
+
+          # REST endpoint to query a tiny row set from a seeded table
+          URL="${SUPABASE_URL}/rest/v1/projects?select=id&limit=1"
+
+          # Try up to 3 times with exponential backoff
+          attempt=0
+          max_attempts=3
+          backoff=2
+
+          while :; do
+            attempt=$((attempt + 1))
+            echo "Ping attempt $attempt -> $URL"
+            http_code=$(curl -sS -w "%{http_code}" -o /tmp/ping.json \
+              -H "apikey: ${SUPABASE_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_KEY}" \
+              "${URL}" || echo "000")
+
+            # print a small preview of returned payload for debugging (will be masked if secret contains it)
+            if [ -s /tmp/ping.json ]; then
+              echo "Returned JSON (preview):"
+              head -n 10 /tmp/ping.json || true
+            fi
+
+            if [ "$http_code" = "200" ]; then
+              echo "Ping OK (HTTP 200)."
+              exit 0
+            fi
+
+            echo "Ping failed (HTTP $http_code)."
+
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "All attempts failed. Exiting with failure."
+              exit 1
+            fi
+
+            sleep_seconds=$((backoff ** attempt))
+            echo "Retrying in ${sleep_seconds}s..."
+            sleep "${sleep_seconds}"
+          done
