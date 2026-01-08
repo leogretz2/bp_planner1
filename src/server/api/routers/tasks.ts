@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createTRPCRouter,
   publicProcedure,
+  protectedProcedure,
 } from "import-alias/server/api/trpc";
 import { tasks, task_assignments } from "import-alias/server/db/schema";
 import { and, eq, inArray } from "drizzle-orm";
@@ -33,7 +34,7 @@ export const tasksRouter = createTRPCRouter({
       return await q.limit(500);
     }),
 
-  create: publicProcedure
+  create: protectedProcedure
     .input(
       z.object({
         projectId: z.string().uuid(),
@@ -45,8 +46,6 @@ export const tasksRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // DEBUG - add back with supabase authentication
-      //   if (!ctx.user) throw new Error("Unauthorized");
       const [created] = await ctx.db
         .insert(tasks)
         .values({
@@ -59,7 +58,7 @@ export const tasksRouter = createTRPCRouter({
             input.estimatedHours != null
               ? input.estimatedHours.toString()
               : null,
-          // DEBUG - omit until supabase auth - created_by is nullable created_by: ctx.user.id,
+          created_by: ctx.user.id,
         })
         .returning();
       return created;

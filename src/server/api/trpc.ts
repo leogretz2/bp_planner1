@@ -6,11 +6,14 @@
  * TL;DR - This is where all the tRPC server stuff is created and plugged in. The pieces you will
  * need to use are documented accordingly near the end.
  */
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
 import { db } from "import-alias/server/db";
+import { users } from "import-alias/server/db/schema";
+import { createClient } from "import-alias/lib/supabase/server";
+import { eq } from "drizzle-orm";
 
 /**
  * 1. CONTEXT
@@ -25,8 +28,44 @@ import { db } from "import-alias/server/db";
  * @see https://trpc.io/docs/server/context
  */
 export const createTRPCContext = async (opts: { headers: Headers }) => {
+  // Get Supabase user from session
+  const supabase = await createClient();
+  const {
+    data: { user: supabaseUser },
+  } = await supabase.auth.getUser();
+
+  // If authenticated, get or create user in our Drizzle database
+  let user = null;
+  if (supabaseUser) {
+    // Look up user in our database
+    const [existingUser] = await db
+      .select()
+      .from(users)
+      .where(eq(users.id, supabaseUser.id))
+      .limit(1);
+
+    if (existingUser) {
+      user = existingUser;
+    } else {
+      // Auto-create user in our database (synced from Supabase auth)
+      const [newUser] = await db
+        .insert(users)
+        .values({
+          id: supabaseUser.id,
+          email: supabaseUser.email!,
+          display_name: supabaseUser.user_metadata?.display_name ?? supabaseUser.email?.split("@")[0] ?? "User",
+          avatar_url: supabaseUser.user_metadata?.avatar_url ?? null,
+          role: "member", // Default role
+        })
+        .returning();
+      user = newUser;
+    }
+  }
+
   return {
     db,
+    supabaseUser,
+    user,
     ...opts,
   };
 };
@@ -104,3 +143,24 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
  * are logged in.
  */
 export const publicProcedure = t.procedure.use(timingMiddleware);
+
+/**
+ * Protected (authenticated) procedure
+ *
+ * If you want a query or mutation to ONLY be accessible to logged in users, use this. It verifies
+ * the session is valid and guarantees `ctx.user` is not null.
+ */
+export const protectedProcedure = t.procedure
+  .use(timingMiddleware)
+  .use(async ({ ctx, next }) => {
+    if (!ctx.user || !ctx.supabaseUser) {
+      throw new TRPCError({ code: "UNAUTHORIZED" });
+    }
+    return next({
+      ctx: {
+        // infers the `user` as non-nullable
+        user: ctx.user,
+        supabaseUser: ctx.supabaseUser,
+      },
+    });
+  });

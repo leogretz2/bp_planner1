@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Ping Supabase with curl
+      - name: Ping Supabase with curl # Use minimal curl command with no libraries, because pnpm-lock.yaml is not supported by GitHub actions
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
