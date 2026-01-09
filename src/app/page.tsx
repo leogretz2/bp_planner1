@@ -2,44 +2,29 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-b from-[#2e026d] to-[#15162c] text-white">
-      <div className="container flex flex-col items-center justify-center gap-12 px-4 py-16">
-        <h1 className="text-5xl font-extrabold tracking-tight sm:text-[5rem]">
-          Task <span className="text-[hsl(280,100%,70%)]">Planner</span>
+    <main className="flex min-h-screen items-center justify-center bg-white">
+      <div className="w-full max-w-md text-center">
+        <h1 className="mb-8 text-4xl font-bold tracking-tight text-gray-900">
+          Task Planner
         </h1>
 
-        <p className="text-xl text-gray-300">
-          Organize your projects, tasks, and team collaboration
+        <p className="mb-12 text-gray-600">
+          Weekly task management for focused execution.
         </p>
 
-        <div className="flex gap-4">
+        <div className="flex flex-col gap-3">
           <Link
             href="/dashboard"
-            className="rounded-lg bg-white/10 px-10 py-4 font-semibold text-white transition hover:bg-white/20"
+            className="rounded-lg bg-gray-900 px-6 py-3 font-medium text-white transition hover:bg-gray-800"
           >
-            Go to Dashboard →
+            Dashboard
           </Link>
-        </div>
-
-        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3 md:gap-8">
-          <div className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4">
-            <h3 className="text-2xl font-bold">📅 Week View</h3>
-            <div className="text-sm">
-              See your tasks organized by day and project
-            </div>
-          </div>
-          <div className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4">
-            <h3 className="text-2xl font-bold">🎯 Task Tracking</h3>
-            <div className="text-sm">
-              Monitor task status, assignments, and deadlines
-            </div>
-          </div>
-          <div className="flex max-w-xs flex-col gap-4 rounded-xl bg-white/10 p-4">
-            <h3 className="text-2xl font-bold">👥 Team Collaboration</h3>
-            <div className="text-sm">
-              Organize work across pods and projects
-            </div>
-          </div>
+          <Link
+            href="/auth/sign-in"
+            className="rounded-lg border border-gray-300 bg-white px-6 py-3 font-medium text-gray-700 transition hover:bg-gray-50"
+          >
+            Sign In
+          </Link>
         </div>
       </div>
     </main>

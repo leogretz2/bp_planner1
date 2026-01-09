@@ -42,5 +42,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 
+# claude
+.claude
+
 # idea files
 .idea
+
+# admin scripts
+scripts/

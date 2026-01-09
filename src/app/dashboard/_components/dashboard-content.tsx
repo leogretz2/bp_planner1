@@ -4,45 +4,16 @@ import { useState, useMemo } from "react";
 import { api } from "import-alias/trpc/react";
 import type { AppRouter } from "import-alias/server/api/root";
 import type { inferRouterOutputs } from "@trpc/server";
-
-// DeBUG - claude created this
-// Type for task from tRPC
-// type Task = NonNullable<Awaited<ReturnType<typeof api.tasks.list.useQuery>>["data"]>[number];
-
-/**
- * Explicit TS types for the UI layer.
- * Keep these in sync with your DB/API shape for safety.
- */
-interface TaskSelf {
-  id: string;
-  project_id: string | null;
-  title: string;
-  description?: string | null;
-  status: "todo" | "in_progress" | "done" | "blocked";
-  // DEBUG - string overrides the other in the union type, lint doesn't like it
-  // status: "todo" | "in_progress" | "done" | "blocked" | string;
-  priority?: number | null;
-  created_by?: string | null;
-  created_at?: string | null;
-  start_date?: string | null; // YYYY-MM-DD
-  due_date?: string | null; // YYYY-MM-DD
-  estimated_hours?: string | number | null;
-}
-
-interface ProjectSelf {
-  id: string;
-  name: string;
-  description?: string | null;
-  pod_id?: string | null;
-  status?: string | null;
-  start_date?: string | null;
-  end_date?: string | null;
-  created_at?: string | null;
-}
+import { CreateTaskModal } from "./create-task-modal";
 
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 type Task = RouterOutputs["tasks"]["list"][number];
 type Project = RouterOutputs["projects"]["list"][number];
+type User = RouterOutputs["users"]["list"][number];
+
+interface DashboardContentProps {
+  currentUser: User;
+}
 
 // Get current week dates (Mon-Sun)
 function getWeekDates() {
@@ -72,11 +43,24 @@ function formatDayLabel(date: Date) {
   });
 }
 
-export function DashboardContent() {
+export function DashboardContent({ currentUser }: DashboardContentProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
   );
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalPrefilledDate, setModalPrefilledDate] = useState<
+    string | undefined
+  >();
+  const [modalPrefilledProjectId, setModalPrefilledProjectId] = useState<
+    string | undefined
+  >();
+  const [modalAnchorElement, setModalAnchorElement] = useState<
+    HTMLElement | null
+  >(null);
+
+  const isAdmin = currentUser.role === "admin";
 
   // Fetch data
   const { data: tasks, isLoading: tasksLoading } = api.tasks.list.useQuery({
@@ -87,14 +71,22 @@ export function DashboardContent() {
   const { data: projects, isLoading: projectsLoading } =
     api.projects.list.useQuery();
 
+  const { data: users, isLoading: usersLoading } = api.users.list.useQuery();
+
   const weekDates = useMemo(() => getWeekDates(), []);
+
+  // Filter tasks by selected user (admin only)
+  const filteredTasks = useMemo(() => {
+    if (!tasks) return [];
+    if (!isAdmin || !selectedUserId) return tasks;
+
+    return tasks.filter((task) => task.created_by === selectedUserId);
+  }, [tasks, isAdmin, selectedUserId]);
 
   // Group tasks by project
   const tasksByProject = useMemo(() => {
-    if (!tasks) return new Map<string, Task[]>();
-
     const grouped = new Map<string, Task[]>();
-    tasks.forEach((task) => {
+    filteredTasks.forEach((task) => {
       const projectId = task.project_id ?? "unassigned";
       if (!grouped.has(projectId)) {
         grouped.set(projectId, []);
@@ -102,7 +94,7 @@ export function DashboardContent() {
       grouped.get(projectId)!.push(task);
     });
     return grouped;
-  }, [tasks]);
+  }, [filteredTasks]);
 
   // Get task for specific day
   const getTasksForDay = (projectTasks: Task[], date: Date) => {
@@ -113,7 +105,25 @@ export function DashboardContent() {
     });
   };
 
-  if (tasksLoading || projectsLoading) {
+  const handleOpenModal = (
+    e: React.MouseEvent<HTMLButtonElement>,
+    date: Date,
+    projectId?: string,
+  ) => {
+    setModalAnchorElement(e.currentTarget);
+    setModalPrefilledDate(formatDate(date));
+    setModalPrefilledProjectId(projectId);
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setModalPrefilledDate(undefined);
+    setModalPrefilledProjectId(undefined);
+    setModalAnchorElement(null);
+  };
+
+  if (tasksLoading || projectsLoading || usersLoading) {
     return <div>Loading...</div>;
   }
 
@@ -140,6 +150,26 @@ export function DashboardContent() {
             ))}
           </select>
         </div>
+
+        {isAdmin && (
+          <div className="flex-1">
+            <label className="mb-2 block text-sm font-medium">
+              Filter by User
+            </label>
+            <select
+              className="w-full rounded border p-2"
+              value={selectedUserId ?? ""}
+              onChange={(e) => setSelectedUserId(e.target.value || null)}
+            >
+              <option value="">All Users</option>
+              {users?.map((user) => (
+                <option key={user.id} value={user.id}>
+                  {user.display_name} ({user.role})
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="flex-1">
           <label className="mb-2 block text-sm font-medium">
@@ -211,7 +241,7 @@ export function DashboardContent() {
                     return (
                       <div
                         key={dayIndex}
-                        className={`min-h-[100px] border-l p-2 ${
+                        className={`group relative min-h-[100px] border-l p-2 ${
                           date.toDateString() === new Date().toDateString()
                             ? "bg-blue-50/30"
                             : ""
@@ -222,6 +252,33 @@ export function DashboardContent() {
                             <TaskCard key={task.id} task={task} />
                           ))}
                         </div>
+
+                        {/* Add Task Button */}
+                        <button
+                          onClick={(e) =>
+                            handleOpenModal(
+                              e,
+                              date,
+                              projectId !== "unassigned" ? projectId : undefined,
+                            )
+                          }
+                          className="absolute bottom-1 right-1 rounded bg-blue-500 p-1 text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
+                          title="Add task"
+                        >
+                          <svg
+                            className="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M12 4v16m8-8H4"
+                            />
+                          </svg>
+                        </button>
                       </div>
                     );
                   })}
@@ -240,20 +297,30 @@ export function DashboardContent() {
 
       {/* Summary Stats */}
       <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Total Tasks" value={tasks?.length ?? 0} />
+        <StatCard label="Total Tasks" value={filteredTasks?.length ?? 0} />
         <StatCard
           label="Todo"
-          value={tasks?.filter((t) => t.status === "todo").length ?? 0}
+          value={filteredTasks?.filter((t) => t.status === "todo").length ?? 0}
         />
         <StatCard
           label="In Progress"
-          value={tasks?.filter((t) => t.status === "in_progress").length ?? 0}
+          value={filteredTasks?.filter((t) => t.status === "in_progress").length ?? 0}
         />
         <StatCard
           label="Done"
-          value={tasks?.filter((t) => t.status === "done").length ?? 0}
+          value={filteredTasks?.filter((t) => t.status === "done").length ?? 0}
         />
       </div>
+
+      {/* Create Task Modal */}
+      <CreateTaskModal
+        isOpen={isModalOpen}
+        onClose={handleCloseModal}
+        projects={projects ?? []}
+        prefilledDate={modalPrefilledDate}
+        prefilledProjectId={modalPrefilledProjectId}
+        anchorElement={modalAnchorElement}
+      />
     </div>
   );
 }

@@ -57,7 +57,13 @@ export default function SignInPage() {
 
           {error && (
             <div className="mb-4 rounded bg-red-50 p-3 text-sm text-red-800">
-              {error}
+              <p className="font-semibold">Error:</p>
+              <p>{error}</p>
+              {error.includes("Email link is invalid") && (
+                <p className="mt-2 text-xs">
+                  The confirmation link has expired. Please sign up again or disable email confirmation in your Supabase dashboard.
+                </p>
+              )}
             </div>
           )}
 
