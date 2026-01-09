@@ -64,6 +64,39 @@ export const tasksRouter = createTRPCRouter({
       return created;
     }),
 
+  update: protectedProcedure
+    .input(
+      z.object({
+        id: z.string().uuid(),
+        projectId: z.string().uuid().optional(),
+        title: z.string().min(1).optional(),
+        description: z.string().optional(),
+        startDate: z.string().date().optional(),
+        dueDate: z.string().date().optional(),
+        estimatedHours: z.number().optional(),
+        status: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const updateData: Record<string, any> = {};
+
+      if (input.projectId !== undefined) updateData.project_id = input.projectId;
+      if (input.title !== undefined) updateData.title = input.title;
+      if (input.description !== undefined) updateData.description = input.description ?? null;
+      if (input.startDate !== undefined) updateData.start_date = input.startDate ?? null;
+      if (input.dueDate !== undefined) updateData.due_date = input.dueDate ?? null;
+      if (input.estimatedHours !== undefined)
+        updateData.estimated_hours = input.estimatedHours != null ? input.estimatedHours.toString() : null;
+      if (input.status !== undefined) updateData.status = input.status;
+
+      const [updated] = await ctx.db
+        .update(tasks)
+        .set(updateData)
+        .where(eq(tasks.id, input.id))
+        .returning();
+      return updated;
+    }),
+
   assignTask: publicProcedure
     .input(
       z.object({

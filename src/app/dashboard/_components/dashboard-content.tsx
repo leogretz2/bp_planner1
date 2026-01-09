@@ -59,6 +59,7 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
   const [modalAnchorElement, setModalAnchorElement] = useState<
     HTMLElement | null
   >(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
 
   const isAdmin = currentUser.role === "admin";
 
@@ -121,6 +122,13 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
     setModalPrefilledDate(undefined);
     setModalPrefilledProjectId(undefined);
     setModalAnchorElement(null);
+    setEditingTask(null);
+  };
+
+  const handleTaskClick = (e: React.MouseEvent<HTMLDivElement>, task: Task) => {
+    setModalAnchorElement(e.currentTarget);
+    setEditingTask(task);
+    setIsModalOpen(true);
   };
 
   if (tasksLoading || projectsLoading || usersLoading) {
@@ -249,7 +257,11 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
                       >
                         <div className="space-y-1">
                           {dayTasks.map((task) => (
-                            <TaskCard key={task.id} task={task} />
+                            <TaskCard
+                              key={task.id}
+                              task={task}
+                              onClick={(e) => handleTaskClick(e, task)}
+                            />
                           ))}
                         </div>
 
@@ -312,7 +324,7 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
         />
       </div>
 
-      {/* Create Task Modal */}
+      {/* Create/Edit Task Modal */}
       <CreateTaskModal
         isOpen={isModalOpen}
         onClose={handleCloseModal}
@@ -320,12 +332,19 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
         prefilledDate={modalPrefilledDate}
         prefilledProjectId={modalPrefilledProjectId}
         anchorElement={modalAnchorElement}
+        task={editingTask ?? undefined}
       />
     </div>
   );
 }
 
-function TaskCard({ task }: { task: Task }) {
+function TaskCard({
+  task,
+  onClick,
+}: {
+  task: Task;
+  onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
+}) {
   const statusColors: Record<string, string> = {
     todo: "bg-gray-200 text-gray-800",
     in_progress: "bg-blue-200 text-blue-800",
@@ -336,7 +355,10 @@ function TaskCard({ task }: { task: Task }) {
   const statusColor = statusColors[task.status] ?? "bg-gray-100";
 
   return (
-    <div className={`rounded p-2 text-xs ${statusColor}`}>
+    <div
+      className={`cursor-pointer rounded p-2 text-xs transition hover:opacity-80 ${statusColor}`}
+      onClick={onClick}
+    >
       <div className="truncate font-medium" title={task.title}>
         {task.title}
       </div>

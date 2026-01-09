@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "import-alias/trpc/react";
 import { Modal } from "./modal";
 import type { inferRouterOutputs } from "@trpc/server";
@@ -8,6 +8,7 @@ import type { AppRouter } from "import-alias/server/api/root";
 
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 type Project = RouterOutputs["projects"]["list"][number];
+type Task = RouterOutputs["tasks"]["list"][number];
 
 interface CreateTaskModalProps {
   isOpen: boolean;
@@ -16,6 +17,7 @@ interface CreateTaskModalProps {
   prefilledDate?: string; // YYYY-MM-DD
   prefilledProjectId?: string;
   anchorElement?: HTMLElement | null;
+  task?: Task; // If provided, we're in edit mode
 }
 
 export function CreateTaskModal({
@@ -25,21 +27,62 @@ export function CreateTaskModal({
   prefilledDate,
   prefilledProjectId,
   anchorElement,
+  task,
 }: CreateTaskModalProps) {
-  const [projectId, setProjectId] = useState(prefilledProjectId ?? "");
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [startDate, setStartDate] = useState(prefilledDate ?? "");
-  const [dueDate, setDueDate] = useState(prefilledDate ?? "");
-  const [estimatedHours, setEstimatedHours] = useState("");
+  const isEditMode = !!task;
+
+  const [projectId, setProjectId] = useState(
+    task?.project_id ?? prefilledProjectId ?? "",
+  );
+  const [title, setTitle] = useState(task?.title ?? "");
+  const [description, setDescription] = useState(task?.description ?? "");
+  const [startDate, setStartDate] = useState(
+    task?.start_date ?? prefilledDate ?? "",
+  );
+  const [dueDate, setDueDate] = useState(task?.due_date ?? prefilledDate ?? "");
+  const [estimatedHours, setEstimatedHours] = useState(
+    task?.estimated_hours ?? "",
+  );
+  const [status, setStatus] = useState(task?.status ?? "todo");
   const [error, setError] = useState<string | null>(null);
 
+  // Update form when task changes
+  useEffect(() => {
+    if (task) {
+      setProjectId(task.project_id ?? "");
+      setTitle(task.title);
+      setDescription(task.description ?? "");
+      setStartDate(task.start_date ?? "");
+      setDueDate(task.due_date ?? "");
+      setEstimatedHours(task.estimated_hours ?? "");
+      setStatus(task.status);
+    } else {
+      setProjectId(prefilledProjectId ?? "");
+      setTitle("");
+      setDescription("");
+      setStartDate(prefilledDate ?? "");
+      setDueDate(prefilledDate ?? "");
+      setEstimatedHours("");
+      setStatus("todo");
+    }
+  }, [task, prefilledDate, prefilledProjectId]);
+
   const utils = api.useUtils();
+
   const createTask = api.tasks.create.useMutation({
     onSuccess: () => {
-      // Refresh task list
       utils.tasks.list.invalidate();
-      // Reset form
+      resetForm();
+      onClose();
+    },
+    onError: (err) => {
+      setError(err.message);
+    },
+  });
+
+  const updateTask = api.tasks.update.useMutation({
+    onSuccess: () => {
+      utils.tasks.list.invalidate();
       resetForm();
       onClose();
     },
@@ -67,21 +110,36 @@ export function CreateTaskModal({
       return;
     }
 
-    createTask.mutate({
-      projectId,
-      title,
-      description: description || undefined,
-      startDate: startDate || undefined,
-      dueDate: dueDate || undefined,
-      estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
-    });
+    if (isEditMode && task) {
+      updateTask.mutate({
+        id: task.id,
+        projectId,
+        title,
+        description: description || undefined,
+        startDate: startDate || undefined,
+        dueDate: dueDate || undefined,
+        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+        status,
+      });
+    } else {
+      createTask.mutate({
+        projectId,
+        title,
+        description: description || undefined,
+        startDate: startDate || undefined,
+        dueDate: dueDate || undefined,
+        estimatedHours: estimatedHours ? parseFloat(estimatedHours) : undefined,
+      });
+    }
   };
+
+  const isPending = createTask.isPending || updateTask.isPending;
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="New Task"
+      title={isEditMode ? "Edit Task" : "New Task"}
       anchorElement={anchorElement}
     >
       <form onSubmit={handleSubmit} className="space-y-3">
@@ -92,7 +150,10 @@ export function CreateTaskModal({
         )}
 
         <div>
-          <label htmlFor="project" className="mb-1 block text-xs font-medium text-gray-700">
+          <label
+            htmlFor="project"
+            className="mb-1 block text-xs font-medium text-gray-700"
+          >
             Project
           </label>
           <select
@@ -112,7 +173,10 @@ export function CreateTaskModal({
         </div>
 
         <div>
-          <label htmlFor="title" className="mb-1 block text-xs font-medium text-gray-700">
+          <label
+            htmlFor="title"
+            className="mb-1 block text-xs font-medium text-gray-700"
+          >
             Title
           </label>
           <input
@@ -180,13 +244,35 @@ export function CreateTaskModal({
           </div>
         </div>
 
+        {isEditMode && (
+          <div>
+            <label
+              htmlFor="status"
+              className="mb-1 block text-xs font-medium text-gray-700"
+            >
+              Status
+            </label>
+            <select
+              id="status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value)}
+              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+            >
+              <option value="todo">Todo</option>
+              <option value="in_progress">In Progress</option>
+              <option value="done">Done</option>
+              <option value="blocked">Blocked</option>
+            </select>
+          </div>
+        )}
+
         <div className="flex gap-2 pt-1">
           <button
             type="submit"
-            disabled={createTask.isPending}
+            disabled={isPending}
             className="flex-1 rounded bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 disabled:opacity-50"
           >
-            {createTask.isPending ? "Creating..." : "Create"}
+            {isPending ? (isEditMode ? "Saving..." : "Creating...") : (isEditMode ? "Save" : "Create")}
           </button>
           <button
             type="button"
