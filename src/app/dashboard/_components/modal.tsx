@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface ModalProps {
   isOpen: boolean;
@@ -10,6 +11,45 @@ interface ModalProps {
   anchorElement?: HTMLElement | null;
 }
 
+// Hook to detect prefers-reduced-motion
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setPrefersReducedMotion(mediaQuery.matches);
+
+    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
+    mediaQuery.addEventListener("change", handler);
+    return () => mediaQuery.removeEventListener("change", handler);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
+// Animation variants
+const backdropVariants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1 },
+};
+
+const popoverVariants = {
+  hidden: { opacity: 0, scale: 0.98, y: 4 },
+  visible: { opacity: 1, scale: 1, y: 0 },
+};
+
+const springTransition = {
+  type: "spring" as const,
+  stiffness: 400,
+  damping: 28,
+  duration: 0.35,
+};
+
+const exitTransition = {
+  duration: 0.2,
+  ease: [0.4, 0, 1, 1],
+};
+
 export function Modal({
   isOpen,
   onClose,
@@ -18,6 +58,7 @@ export function Modal({
   anchorElement,
 }: ModalProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
+  const prefersReducedMotion = usePrefersReducedMotion();
 
   useEffect(() => {
     if (!isOpen || !anchorElement || !popoverRef.current) return;
@@ -70,41 +111,76 @@ export function Modal({
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
+  // Reduced motion: simple fade only
+  if (prefersReducedMotion) {
+    if (!isOpen) return null;
+
+    return (
+      <>
+        <div className="fixed inset-0 z-40 bg-black/10" />
+        <div
+          ref={popoverRef}
+          className="fixed z-50 w-[360px] rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
+        >
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-base font-semibold tracking-tight text-gray-900">{title}</h2>
+            <button
+              onClick={onClose}
+              className="text-gray-400 transition hover:text-gray-600"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {children}
+        </div>
+      </>
+    );
+  }
 
   return (
-    <>
-      {/* Subtle backdrop */}
-      <div className="fixed inset-0 z-40 bg-black/10" />
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          {/* Backdrop */}
+          <motion.div
+            className="fixed inset-0 z-40 bg-black/10"
+            variants={backdropVariants}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            transition={{ duration: 0.2 }}
+          />
 
-      {/* Popover */}
-      <div
-        ref={popoverRef}
-        className="fixed z-50 w-[360px] rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold tracking-tight text-gray-900">{title}</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 transition hover:text-gray-600"
+          {/* Popover */}
+          <motion.div
+            ref={popoverRef}
+            className="fixed z-50 w-[360px] rounded-lg border border-gray-200 bg-white p-4 shadow-lg"
+            variants={popoverVariants}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
+            transition={{
+              ...springTransition,
+              exit: exitTransition,
+            }}
           >
-            <svg
-              className="h-5 w-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
-          </button>
-        </div>
-        {children}
-      </div>
-    </>
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-base font-semibold tracking-tight text-gray-900">{title}</h2>
+              <button
+                onClick={onClose}
+                className="text-gray-400 transition hover:text-gray-600"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            {children}
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
   );
 }

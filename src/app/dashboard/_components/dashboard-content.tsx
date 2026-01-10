@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { api } from "import-alias/trpc/react";
 import type { AppRouter } from "import-alias/server/api/root";
 import type { inferRouterOutputs } from "@trpc/server";
 import { CreateTaskModal } from "./create-task-modal";
+import { motion } from "framer-motion";
 
 type RouterOutputs = inferRouterOutputs<AppRouter>;
 type Task = RouterOutputs["tasks"]["list"][number];
@@ -345,6 +346,41 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
   );
 }
 
+// Hook to detect prefers-reduced-motion
+function usePrefersReducedMotion() {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setPrefersReducedMotion(mediaQuery.matches);
+
+    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
+    mediaQuery.addEventListener("change", handler);
+    return () => mediaQuery.removeEventListener("change", handler);
+  }, []);
+
+  return prefersReducedMotion;
+}
+
+// Animation constants
+const taskCardVariants = {
+  initial: { opacity: 0, y: 6 },
+  animate: { opacity: 1, y: 0 },
+};
+
+const taskCardTransition = {
+  type: "spring" as const,
+  stiffness: 400,
+  damping: 25,
+  duration: 0.35,
+};
+
+const taskCardHover = {
+  scale: 1.01,
+  y: -4,
+  transition: { type: "spring" as const, stiffness: 400, damping: 20 },
+};
+
 function TaskCard({
   task,
   onClick,
@@ -352,6 +388,8 @@ function TaskCard({
   task: Task;
   onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
 }) {
+  const prefersReducedMotion = usePrefersReducedMotion();
+
   const statusStyles: Record<string, { bg: string; indicator: string }> = {
     todo: { bg: "bg-gray-50 border-gray-200", indicator: "bg-gray-400" },
     in_progress: { bg: "bg-gray-50 border-gray-300", indicator: "bg-gray-900" },
@@ -361,18 +399,39 @@ function TaskCard({
 
   const style = statusStyles[task.status] ?? statusStyles.todo;
 
-  return (
-    <div
-      className={`cursor-pointer rounded-md border p-2 text-xs transition hover:border-gray-400 ${style.bg}`}
-      onClick={onClick}
-    >
-      <div className="flex items-center gap-1.5">
-        <span className={`h-1.5 w-1.5 rounded-full ${style.indicator}`} />
-        <span className="truncate font-medium text-gray-900" title={task.title}>
-          {task.title}
-        </span>
-      </div>
+  const cardContent = (
+    <div className="flex items-center gap-1.5">
+      <span className={`h-1.5 w-1.5 rounded-full ${style.indicator}`} />
+      <span className="truncate font-medium text-gray-900" title={task.title}>
+        {task.title}
+      </span>
     </div>
+  );
+
+  // Render static div if user prefers reduced motion
+  if (prefersReducedMotion) {
+    return (
+      <div
+        className={`cursor-pointer rounded-md border p-2 text-xs ${style.bg}`}
+        onClick={onClick}
+      >
+        {cardContent}
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      className={`cursor-pointer rounded-md border p-2 text-xs ${style.bg}`}
+      onClick={onClick}
+      variants={taskCardVariants}
+      initial="initial"
+      animate="animate"
+      transition={taskCardTransition}
+      whileHover={taskCardHover}
+    >
+      {cardContent}
+    </motion.div>
   );
 }
 
