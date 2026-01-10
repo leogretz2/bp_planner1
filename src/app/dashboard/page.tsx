@@ -44,8 +44,10 @@ export default async function DashboardPage() {
   return (
     <div className="container mx-auto p-6">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Tasks Dashboard</h1>
-        <p className="text-muted-foreground mt-2">
+        <h1 className="text-3xl font-bold tracking-tight text-gray-900">
+          Tasks
+        </h1>
+        <p className="mt-1 text-gray-600">
           Weekly view of your tasks and projects
         </p>
       </div>

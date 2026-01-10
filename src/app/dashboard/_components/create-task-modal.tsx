@@ -144,7 +144,7 @@ export function CreateTaskModal({
     >
       <form onSubmit={handleSubmit} className="space-y-3">
         {error && (
-          <div className="rounded bg-red-50 p-2 text-xs text-red-800">
+          <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-red-700">
             {error}
           </div>
         )}
@@ -161,7 +161,7 @@ export function CreateTaskModal({
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
             required
-            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-gray-900 focus:outline-none"
           >
             <option value="">Select project</option>
             {projects?.map((project) => (
@@ -185,7 +185,7 @@ export function CreateTaskModal({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             required
-            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-gray-900 focus:outline-none"
             placeholder="What needs to be done?"
           />
         </div>
@@ -201,7 +201,7 @@ export function CreateTaskModal({
             id="description"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-gray-900 focus:outline-none"
             rows={2}
             placeholder="Additional details"
           />
@@ -220,7 +220,7 @@ export function CreateTaskModal({
               type="date"
               value={dueDate}
               onChange={(e) => setDueDate(e.target.value)}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-gray-900 focus:outline-none"
             />
           </div>
 
@@ -238,7 +238,7 @@ export function CreateTaskModal({
               min="0"
               value={estimatedHours}
               onChange={(e) => setEstimatedHours(e.target.value)}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-gray-900 focus:outline-none"
               placeholder="8"
             />
           </div>
@@ -256,7 +256,7 @@ export function CreateTaskModal({
               id="status"
               value={status}
               onChange={(e) => setStatus(e.target.value)}
-              className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm focus:border-gray-900 focus:outline-none"
             >
               <option value="todo">Todo</option>
               <option value="in_progress">In Progress</option>
@@ -266,18 +266,18 @@ export function CreateTaskModal({
           </div>
         )}
 
-        <div className="flex gap-2 pt-1">
+        <div className="flex gap-2 pt-2">
           <button
             type="submit"
             disabled={isPending}
-            className="flex-1 rounded bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 disabled:opacity-50"
+            className="flex-1 rounded-md bg-gray-900 py-2 text-sm font-medium text-white transition hover:bg-gray-800 disabled:opacity-50"
           >
             {isPending ? (isEditMode ? "Saving..." : "Creating...") : (isEditMode ? "Save" : "Create")}
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-gray-300 px-3 py-2 text-sm font-medium transition hover:bg-gray-50"
+            className="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
           >
             Cancel
           </button>

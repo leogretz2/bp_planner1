@@ -24,14 +24,14 @@ export async function Navbar() {
   }
 
   return (
-    <nav className="border-b bg-white">
+    <nav className="border-b border-gray-200 bg-white">
       <div className="container mx-auto px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-6">
-            <Link href="/" className="text-xl font-bold">
+            <Link href="/" className="text-lg font-semibold tracking-tight text-gray-900">
               Planner
             </Link>
-            <Link href="/dashboard" className="text-sm hover:text-blue-600">
+            <Link href="/dashboard" className="text-sm text-gray-600 transition hover:text-gray-900">
               Dashboard
             </Link>
           </div>
@@ -44,7 +44,7 @@ export async function Navbar() {
                     <span className="text-sm font-medium text-gray-900">
                       {user.display_name}
                     </span>
-                    <span className="text-xs rounded-full bg-blue-100 px-2 py-1 text-blue-800">
+                    <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600">
                       {user.role}
                     </span>
                   </>
@@ -54,7 +54,7 @@ export async function Navbar() {
             ) : (
               <Link
                 href="/auth/sign-in"
-                className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-gray-800"
               >
                 Sign In
               </Link>

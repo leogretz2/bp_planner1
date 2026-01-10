@@ -144,13 +144,13 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <div className="flex items-center gap-4 rounded-lg border bg-white p-4">
+      <div className="flex items-center gap-6 rounded-lg border border-gray-200 bg-white p-4">
         <div className="flex-1">
-          <label className="mb-2 block text-sm font-medium">
-            Filter by Project
+          <label className="mb-1.5 block text-xs font-medium text-gray-500">
+            Project
           </label>
           <select
-            className="w-full rounded border p-2"
+            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
             value={selectedProjectId ?? ""}
             onChange={(e) => setSelectedProjectId(e.target.value || null)}
           >
@@ -165,11 +165,11 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
 
         {isAdmin && (
           <div className="flex-1">
-            <label className="mb-2 block text-sm font-medium">
-              Filter by User
+            <label className="mb-1.5 block text-xs font-medium text-gray-500">
+              User
             </label>
             <select
-              className="w-full rounded border p-2"
+              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
               value={selectedUserId ?? ""}
               onChange={(e) => setSelectedUserId(e.target.value || null)}
             >
@@ -184,12 +184,12 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
         )}
 
         <div className="flex-1">
-          <label className="mb-2 block text-sm font-medium">
-            Filter by Status
+          <label className="mb-1.5 block text-xs font-medium text-gray-500">
+            Status
           </label>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-3">
             {statusOptions.map((status) => (
-              <label key={status} className="flex items-center gap-1 text-sm">
+              <label key={status} className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-700">
                 <input
                   type="checkbox"
                   checked={selectedStatuses.includes(status)}
@@ -202,6 +202,7 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
                       );
                     }
                   }}
+                  className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
                 />
                 {status.replace("_", " ")}
               </label>
@@ -213,15 +214,17 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
       {/* Week View */}
       <div className="overflow-hidden rounded-lg border bg-white">
         {/* Week Header */}
-        <div className="grid grid-cols-8 border-b bg-gray-50">
-          <div className="border-r p-4 font-semibold">Project</div>
+        <div className="grid grid-cols-8 border-b border-gray-200 bg-gray-50">
+          <div className="border-r border-gray-200 p-4 text-sm font-medium text-gray-600">
+            Project
+          </div>
           {weekDates.map((date, i) => (
             <div
               key={i}
-              className={`p-4 text-center font-medium ${
+              className={`p-4 text-center text-sm font-medium ${
                 date.toDateString() === new Date().toDateString()
-                  ? "bg-blue-50 text-blue-700"
-                  : ""
+                  ? "bg-gray-900 text-white"
+                  : "text-gray-600"
               }`}
             >
               {formatDayLabel(date)}
@@ -236,13 +239,13 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
             const projectName = project?.name ?? "Unassigned";
 
             return (
-              <div key={projectId} className="border-b last:border-b-0">
+              <div key={projectId} className="border-b border-gray-200 last:border-b-0">
                 <div className="grid grid-cols-8">
                   {/* Project Name */}
-                  <div className="flex items-start border-r bg-gray-50 p-4 font-medium">
-                    {projectName}
-                    <span className="ml-2 text-xs text-gray-500">
-                      ({projectTasks.length})
+                  <div className="flex items-start border-r border-gray-200 bg-gray-50 p-4">
+                    <span className="text-sm font-medium text-gray-900">{projectName}</span>
+                    <span className="ml-2 text-xs text-gray-400">
+                      {projectTasks.length}
                     </span>
                   </div>
 
@@ -253,9 +256,9 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
                     return (
                       <div
                         key={dayIndex}
-                        className={`group relative min-h-[100px] border-l p-2 ${
+                        className={`group relative min-h-[100px] border-l border-gray-100 p-2 ${
                           date.toDateString() === new Date().toDateString()
-                            ? "bg-blue-50/30"
+                            ? "bg-gray-50"
                             : ""
                         }`}
                       >
@@ -278,7 +281,7 @@ export function DashboardContent({ currentUser }: DashboardContentProps) {
                               projectId !== "unassigned" ? projectId : undefined,
                             )
                           }
-                          className="absolute bottom-1 right-1 rounded bg-blue-500 p-1 text-white opacity-0 transition-opacity hover:bg-blue-600 group-hover:opacity-100"
+                          className="absolute bottom-1 right-1 rounded-md bg-gray-900 p-1 text-white opacity-0 transition-opacity hover:bg-gray-800 group-hover:opacity-100"
                           title="Add task"
                         >
                           <svg
@@ -375,9 +378,9 @@ function TaskCard({
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border bg-white p-4">
-      <div className="text-sm text-gray-600">{label}</div>
-      <div className="mt-1 text-2xl font-bold">{value}</div>
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="text-xs font-medium text-gray-500">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">{value}</div>
     </div>
   );
 }
