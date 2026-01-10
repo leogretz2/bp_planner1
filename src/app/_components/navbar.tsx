@@ -37,14 +37,18 @@ export async function Navbar() {
           </div>
 
           <div className="flex items-center gap-4">
-            {user ? (
+            {supabaseUser ? (
               <>
-                <span className="text-sm font-medium text-gray-900">
-                  {user.display_name}
-                </span>
-                <span className="text-xs rounded-full bg-blue-100 px-2 py-1 text-blue-800">
-                  {user.role}
-                </span>
+                {user && (
+                  <>
+                    <span className="text-sm font-medium text-gray-900">
+                      {user.display_name}
+                    </span>
+                    <span className="text-xs rounded-full bg-blue-100 px-2 py-1 text-blue-800">
+                      {user.role}
+                    </span>
+                  </>
+                )}
                 <SignOutButton />
               </>
             ) : (

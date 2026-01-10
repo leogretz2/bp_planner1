@@ -32,7 +32,11 @@ function getWeekDates() {
 }
 
 function formatDate(date: Date) {
-  return date.toISOString().split("T")[0]; // YYYY-MM-DD
+  // Use local date to avoid timezone issues
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function formatDayLabel(date: Date) {
@@ -345,25 +349,25 @@ function TaskCard({
   task: Task;
   onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
 }) {
-  const statusColors: Record<string, string> = {
-    todo: "bg-gray-200 text-gray-800",
-    in_progress: "bg-blue-200 text-blue-800",
-    done: "bg-green-200 text-green-800",
-    blocked: "bg-red-200 text-red-800",
+  const statusStyles: Record<string, { bg: string; indicator: string }> = {
+    todo: { bg: "bg-gray-50 border-gray-200", indicator: "bg-gray-400" },
+    in_progress: { bg: "bg-gray-50 border-gray-300", indicator: "bg-gray-900" },
+    done: { bg: "bg-gray-50 border-gray-200", indicator: "bg-gray-300" },
+    blocked: { bg: "bg-red-50 border-red-200", indicator: "bg-red-400" },
   };
 
-  const statusColor = statusColors[task.status] ?? "bg-gray-100";
+  const style = statusStyles[task.status] ?? statusStyles.todo;
 
   return (
     <div
-      className={`cursor-pointer rounded p-2 text-xs transition hover:opacity-80 ${statusColor}`}
+      className={`cursor-pointer rounded-md border p-2 text-xs transition hover:border-gray-400 ${style.bg}`}
       onClick={onClick}
     >
-      <div className="truncate font-medium" title={task.title}>
-        {task.title}
-      </div>
-      <div className="mt-1 text-[10px] opacity-80">
-        {task.status.replace("_", " ")}
+      <div className="flex items-center gap-1.5">
+        <span className={`h-1.5 w-1.5 rounded-full ${style.indicator}`} />
+        <span className="truncate font-medium text-gray-900" title={task.title}>
+          {task.title}
+        </span>
       </div>
     </div>
   );
