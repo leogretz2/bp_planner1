@@ -2,7 +2,7 @@ name: Minimal Ping Supabase to Prevent Pausing
 
 on:
   schedule:
-    - cron: "0 10 * * 2,5"   # 10:00 UTC every Tue & Fri
+    - cron: "0 10 * * *"   # 10:00 UTC every day
   workflow_dispatch: {}
 
 permissions:
