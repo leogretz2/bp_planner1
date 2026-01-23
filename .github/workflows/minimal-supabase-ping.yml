@@ -25,12 +25,30 @@ jobs:
             exit 2
           fi
 
+          # derived fields
+          HOST=$(echo "${SUPABASE_URL}" | sed -E 's#https?://##; s#/*$##')
+
           # REST endpoint to query a tiny row set from a seeded table
           URL="${SUPABASE_URL}/rest/v1/projects?select=id&limit=1"
 
-          # Try up to 3 times with exponential backoff
+          echo "Supabase host: ${HOST}"
+          echo "Query URL: ${URL}"
+
+          echo "Resolver configuration (/etc/resolv.conf):"
+          cat /etc/resolv.conf || true
+
+          echo
+          echo "Testing DNS resolution with nslookup (installing dnsutils)..."
+          apt-get update -qq && apt-get install -y -qq dnsutils || true
+          echo "nslookup ${HOST}:"
+          nslookup "${HOST}" || true
+
+          echo "Testing basic outbound connectivity (github.com)"
+          curl -sSf -o /dev/null https://api.github.com || echo "Warning: connectivity to api.github.com failed"
+
+          # Try up to 6 times with exponential backoff
           attempt=0
-          max_attempts=3
+          max_attempts=6
           backoff=2
 
           while :; do
@@ -54,8 +72,23 @@ jobs:
 
             echo "Ping failed (HTTP $http_code)."
 
+            if [ "${http_code}" = "000" ]; then
+              echo "curl returned 000 — likely DNS or network error."
+            fi
+
             if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "All attempts failed. Exiting with failure."
+              echo "All ${max_attempts} failed. Gathering diagnostics..."
+              
+              echo "--- DNS lookup (host) ---"
+              nslookup "${HOST}" || true
+
+              echo "--- ping google DNS 1.1.1.1 (ICMP may be blocked) ---"
+              ping -c 2 1.1.1.1 || true
+
+              echo "--- curl to example.com ---"
+              curl -sS -o /dev/null -w "HTTP %{http_code}\n" https://example.com || true
+
+              echo "Exiting with failure so the run is marked failed."
               exit 1
             fi
 
