@@ -42,28 +42,21 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-          Tasks
-        </h1>
-        <p className="mt-1 text-gray-600">
-          Weekly view of your tasks and projects
-        </p>
-      </div>
-
-      <Suspense fallback={<DashboardSkeleton />}>
+    <div className="h-screen w-screen overflow-hidden bg-[#0F0F14]">
+      <Suspense fallback={<CanvasSkeleton />}>
         <DashboardContent currentUser={currentUser} />
       </Suspense>
     </div>
   );
 }
 
-function DashboardSkeleton() {
+function CanvasSkeleton() {
   return (
-    <div className="space-y-4">
-      <div className="h-10 bg-gray-200 rounded animate-pulse" />
-      <div className="h-96 bg-gray-200 rounded animate-pulse" />
+    <div className="flex h-full w-full items-center justify-center bg-[#0F0F14]">
+      <div className="flex flex-col items-center gap-3">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/10 border-t-indigo-500" />
+        <span className="text-xs text-white/20">Loading canvas...</span>
+      </div>
     </div>
   );
 }

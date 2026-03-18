@@ -1,445 +1,768 @@
+// PROTOTYPE: Using mock data. Will connect to tRPC in production.
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { api } from "import-alias/trpc/react";
-import type { AppRouter } from "import-alias/server/api/root";
-import type { inferRouterOutputs } from "@trpc/server";
-import { CreateTaskModal } from "./create-task-modal";
-import { motion } from "framer-motion";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  MOCK_TASKS,
+  MOCK_PROJECTS,
+  PROJECT_COLORS,
+  type MockTask,
+} from "./mock-data";
 
-type RouterOutputs = inferRouterOutputs<AppRouter>;
-type Task = RouterOutputs["tasks"]["list"][number];
-type Project = RouterOutputs["projects"]["list"][number];
-type User = RouterOutputs["users"]["list"][number];
+// ---------- types ----------
 
-interface DashboardContentProps {
-  currentUser: User;
+interface CanvasTransform {
+  x: number;
+  y: number;
+  scale: number;
 }
 
-// Get current week dates (Mon-Sun)
-function getWeekDates() {
+type ViewMode = "detail" | "week" | "month";
+
+interface DashboardContentProps {
+  currentUser: unknown;
+}
+
+// ---------- constants ----------
+
+const LANE_WIDTH = 400;
+const LANE_GAP = 40;
+const CARD_WIDTH = 200;
+const CARD_GAP = 12;
+const LANE_TOP_PADDING = 80;
+const BACKLOG_X = -600;
+const MIN_SCALE = 0.2;
+const MAX_SCALE = 3;
+
+const STATUS_DOTS: Record<string, string> = {
+  todo: "#6B7280",
+  in_progress: "#F59E0B",
+  done: "#10B981",
+  blocked: "#EF4444",
+};
+
+// ---------- date helpers ----------
+
+function getWeekDates(weeksAround: number = 4) {
   const today = new Date();
   const currentDay = today.getDay();
   const monday = new Date(today);
   monday.setDate(today.getDate() - (currentDay === 0 ? 6 : currentDay - 1));
 
-  const week = [];
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + i);
-    week.push(date);
+  const dates: Date[] = [];
+  for (let w = -1; w <= weeksAround; w++) {
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(monday);
+      date.setDate(monday.getDate() + w * 7 + d);
+      dates.push(date);
+    }
   }
-  return week;
+  return dates;
 }
 
-function formatDate(date: Date) {
-  // Use local date to avoid timezone issues
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+function formatDateKey(d: Date) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
-function formatDayLabel(date: Date) {
-  return date.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
+function formatDayLabel(d: Date) {
+  return d.toLocaleDateString("en-US", { weekday: "short", day: "numeric" });
 }
 
-export function DashboardContent({ currentUser }: DashboardContentProps) {
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    null,
+function formatMonthDay(d: Date) {
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function isToday(d: Date) {
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
   );
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalPrefilledDate, setModalPrefilledDate] = useState<
-    string | undefined
-  >();
-  const [modalPrefilledProjectId, setModalPrefilledProjectId] = useState<
-    string | undefined
-  >();
-  const [modalAnchorElement, setModalAnchorElement] = useState<
-    HTMLElement | null
-  >(null);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+}
 
-  const isAdmin = currentUser.role === "admin";
+// ---------- layout helper ----------
 
-  // Fetch data
-  const { data: tasks, isLoading: tasksLoading } = api.tasks.list.useQuery({
-    projectId: selectedProjectId ?? undefined,
-    status: selectedStatuses.length > 0 ? selectedStatuses : undefined,
+function buildLaneLayout(dates: Date[], tasks: typeof MOCK_TASKS) {
+  const lanes: {
+    date: Date;
+    dateKey: string;
+    x: number;
+    tasks: typeof MOCK_TASKS;
+  }[] = [];
+
+  const todayKey = formatDateKey(new Date());
+  let todayLaneX = 0;
+
+  dates.forEach((date, i) => {
+    const dateKey = formatDateKey(date);
+    const x = i * (LANE_WIDTH + LANE_GAP);
+    const laneTasks = tasks.filter(
+      (t) => t.due_date === dateKey || t.start_date === dateKey,
+    );
+    lanes.push({ date, dateKey, x, tasks: laneTasks });
+    if (dateKey === todayKey) todayLaneX = x;
   });
 
-  const { data: projects, isLoading: projectsLoading } =
-    api.projects.list.useQuery();
+  const backlogTasks = tasks.filter(
+    (t) => !t.due_date && !t.start_date,
+  );
 
-  const { data: users, isLoading: usersLoading } = api.users.list.useQuery();
+  return { lanes, backlogTasks, todayLaneX };
+}
 
-  const weekDates = useMemo(() => getWeekDates(), []);
+// ---------- main component ----------
 
-  // Filter tasks by selected user (admin only)
-  const filteredTasks = useMemo(() => {
-    if (!tasks) return [];
-    if (!isAdmin || !selectedUserId) return tasks;
+export function DashboardContent({ currentUser: _currentUser }: DashboardContentProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [transform, setTransform] = useState<CanvasTransform>({
+    x: 0,
+    y: 0,
+    scale: 1,
+  });
+  const [isPanning, setIsPanning] = useState(false);
+  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
+  const panStartRef = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
+  const [initialized, setInitialized] = useState(false);
 
-    return tasks.filter((task) => task.created_by === selectedUserId);
-  }, [tasks, isAdmin, selectedUserId]);
+  const dates = useMemo(() => getWeekDates(4), []);
+  const { lanes, backlogTasks, todayLaneX } = useMemo(
+    () => buildLaneLayout(dates, MOCK_TASKS),
+    [dates],
+  );
 
-  // Group tasks by project
-  const tasksByProject = useMemo(() => {
-    const grouped = new Map<string, Task[]>();
-    filteredTasks.forEach((task) => {
-      const projectId = task.project_id ?? "unassigned";
-      if (!grouped.has(projectId)) {
-        grouped.set(projectId, []);
+  const viewMode: ViewMode = useMemo(() => {
+    if (transform.scale > 1.5) return "detail";
+    if (transform.scale < 0.7) return "month";
+    return "week";
+  }, [transform.scale]);
+
+  // Center on today on mount
+  useEffect(() => {
+    if (initialized) return;
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    setTransform({
+      x: -todayLaneX + rect.width / 2 - LANE_WIDTH / 2,
+      y: 40,
+      scale: 1,
+    });
+    setInitialized(true);
+  }, [todayLaneX, initialized]);
+
+  // --- pan handlers ---
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      // Only pan from empty canvas (not cards)
+      if ((e.target as HTMLElement).closest("[data-card]")) return;
+      e.preventDefault();
+      setIsPanning(true);
+      panStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        tx: transform.x,
+        ty: transform.y,
+      };
+    },
+    [transform.x, transform.y],
+  );
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!isPanning) return;
+      const dx = e.clientX - panStartRef.current.x;
+      const dy = e.clientY - panStartRef.current.y;
+      setTransform((prev) => ({
+        ...prev,
+        x: panStartRef.current.tx + dx,
+        y: panStartRef.current.ty + dy,
+      }));
+    },
+    [isPanning],
+  );
+
+  const handleMouseUp = useCallback(() => {
+    setIsPanning(false);
+  }, []);
+
+  // --- zoom handler ---
+  const handleWheel = useCallback(
+    (e: React.WheelEvent) => {
+      e.preventDefault();
+      const container = containerRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const cursorX = e.clientX - rect.left;
+      const cursorY = e.clientY - rect.top;
+
+      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+
+      setTransform((prev) => {
+        const newScale = Math.min(
+          MAX_SCALE,
+          Math.max(MIN_SCALE, prev.scale * zoomFactor),
+        );
+        const scaleRatio = newScale / prev.scale;
+        return {
+          scale: newScale,
+          x: cursorX - (cursorX - prev.x) * scaleRatio,
+          y: cursorY - (cursorY - prev.y) * scaleRatio,
+        };
+      });
+    },
+    [],
+  );
+
+  // --- keyboard nav ---
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "0" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        const container = containerRef.current;
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        setTransform({
+          x: -todayLaneX + rect.width / 2 - LANE_WIDTH / 2,
+          y: 40,
+          scale: 1,
+        });
       }
-      grouped.get(projectId)!.push(task);
+      if (e.key === "Escape") {
+        setExpandedTaskId(null);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [todayLaneX]);
+
+  // --- group tasks by project for rendering ---
+  const groupByProject = (tasks: MockTask[]) => {
+    const groups: Record<string, MockTask[]> = {};
+    tasks.forEach((t) => {
+      if (!groups[t.project_id]) groups[t.project_id] = [];
+      groups[t.project_id]!.push(t);
     });
-    return grouped;
-  }, [filteredTasks]);
-
-  // Get task for specific day
-  const getTasksForDay = (projectTasks: Task[], date: Date) => {
-    const dateStr = formatDate(date);
-    return projectTasks.filter((task) => {
-      // Show task if it's due on this day or scheduled to start
-      return task.due_date === dateStr || task.start_date === dateStr;
-    });
+    return groups;
   };
-
-  const handleOpenModal = (
-    e: React.MouseEvent<HTMLButtonElement>,
-    date: Date,
-    projectId?: string,
-  ) => {
-    setModalAnchorElement(e.currentTarget);
-    setModalPrefilledDate(formatDate(date));
-    setModalPrefilledProjectId(projectId);
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setModalPrefilledDate(undefined);
-    setModalPrefilledProjectId(undefined);
-    setModalAnchorElement(null);
-    setEditingTask(null);
-  };
-
-  const handleTaskClick = (e: React.MouseEvent<HTMLDivElement>, task: Task) => {
-    setModalAnchorElement(e.currentTarget);
-    setEditingTask(task);
-    setIsModalOpen(true);
-  };
-
-  if (tasksLoading || projectsLoading || usersLoading) {
-    return <div>Loading...</div>;
-  }
-
-  const statusOptions = ["todo", "in_progress", "done", "blocked"];
 
   return (
-    <div className="space-y-6">
-      {/* Filters */}
-      <div className="flex items-center gap-6 rounded-lg border border-gray-200 bg-white p-4">
-        <div className="flex-1">
-          <label className="mb-1.5 block text-xs font-medium text-gray-500">
-            Project
-          </label>
-          <select
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
-            value={selectedProjectId ?? ""}
-            onChange={(e) => setSelectedProjectId(e.target.value || null)}
-          >
-            <option value="">All Projects</option>
-            {projects?.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </div>
+    <div
+      ref={containerRef}
+      className="canvas-bg relative h-full w-full overflow-hidden"
+      style={{ cursor: isPanning ? "grabbing" : "grab" }}
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+      onWheel={handleWheel}
+    >
+      {/* Transform layer */}
+      <div
+        className="absolute left-0 top-0 origin-top-left"
+        style={{
+          transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+          willChange: "transform",
+        }}
+      >
+        {/* Backlog zone */}
+        <BacklogZone
+          tasks={backlogTasks}
+          viewMode={viewMode}
+          expandedTaskId={expandedTaskId}
+          onToggleExpand={setExpandedTaskId}
+          groupByProject={groupByProject}
+        />
 
-        {isAdmin && (
-          <div className="flex-1">
-            <label className="mb-1.5 block text-xs font-medium text-gray-500">
-              User
-            </label>
-            <select
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
-              value={selectedUserId ?? ""}
-              onChange={(e) => setSelectedUserId(e.target.value || null)}
-            >
-              <option value="">All Users</option>
-              {users?.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.display_name} ({user.role})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="flex-1">
-          <label className="mb-1.5 block text-xs font-medium text-gray-500">
-            Status
-          </label>
-          <div className="flex flex-wrap gap-3">
-            {statusOptions.map((status) => (
-              <label key={status} className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={selectedStatuses.includes(status)}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedStatuses([...selectedStatuses, status]);
-                    } else {
-                      setSelectedStatuses(
-                        selectedStatuses.filter((s) => s !== status),
-                      );
-                    }
-                  }}
-                  className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-                />
-                {status.replace("_", " ")}
-              </label>
-            ))}
-          </div>
-        </div>
+        {/* Day lanes */}
+        {lanes.map((lane) => (
+          <DayLane
+            key={lane.dateKey}
+            date={lane.date}
+            dateKey={lane.dateKey}
+            x={lane.x}
+            tasks={lane.tasks}
+            viewMode={viewMode}
+            expandedTaskId={expandedTaskId}
+            onToggleExpand={setExpandedTaskId}
+            groupByProject={groupByProject}
+          />
+        ))}
       </div>
 
-      {/* Week View */}
-      <div className="overflow-hidden rounded-lg border bg-white">
-        {/* Week Header */}
-        <div className="grid grid-cols-8 border-b border-gray-200 bg-gray-50">
-          <div className="border-r border-gray-200 p-4 text-sm font-medium text-gray-600">
-            Project
-          </div>
-          {weekDates.map((date, i) => (
-            <div
-              key={i}
-              className={`p-4 text-center text-sm font-medium ${
-                date.toDateString() === new Date().toDateString()
-                  ? "bg-gray-900 text-white"
-                  : "text-gray-600"
-              }`}
-            >
-              {formatDayLabel(date)}
-            </div>
-          ))}
-        </div>
-
-        {/* Tasks grouped by project */}
-        {Array.from(tasksByProject.entries()).map(
-          ([projectId, projectTasks]) => {
-            const project = projects?.find((p) => p.id === projectId);
-            const projectName = project?.name ?? "Unassigned";
-
-            return (
-              <div key={projectId} className="border-b border-gray-200 last:border-b-0">
-                <div className="grid grid-cols-8">
-                  {/* Project Name */}
-                  <div className="flex items-start border-r border-gray-200 bg-gray-50 p-4">
-                    <span className="text-sm font-medium text-gray-900">{projectName}</span>
-                    <span className="ml-2 text-xs text-gray-400">
-                      {projectTasks.length}
-                    </span>
-                  </div>
-
-                  {/* Days */}
-                  {weekDates.map((date, dayIndex) => {
-                    const dayTasks = getTasksForDay(projectTasks, date);
-
-                    return (
-                      <div
-                        key={dayIndex}
-                        className={`group relative min-h-[100px] border-l border-gray-100 p-2 ${
-                          date.toDateString() === new Date().toDateString()
-                            ? "bg-gray-50"
-                            : ""
-                        }`}
-                      >
-                        <div className="space-y-1">
-                          {dayTasks.map((task) => (
-                            <TaskCard
-                              key={task.id}
-                              task={task}
-                              onClick={(e) => handleTaskClick(e, task)}
-                            />
-                          ))}
-                        </div>
-
-                        {/* Add Task Button */}
-                        <button
-                          onClick={(e) =>
-                            handleOpenModal(
-                              e,
-                              date,
-                              projectId !== "unassigned" ? projectId : undefined,
-                            )
-                          }
-                          className="absolute bottom-1 right-1 rounded-md bg-gray-900 p-1 text-white opacity-0 transition-opacity hover:bg-gray-800 group-hover:opacity-100"
-                          title="Add task"
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 4v16m8-8H4"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          },
-        )}
-
-        {tasksByProject.size === 0 && (
-          <div className="p-8 text-center text-gray-500">
-            No tasks found. Try adjusting your filters.
-          </div>
-        )}
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Total Tasks" value={filteredTasks?.length ?? 0} />
-        <StatCard
-          label="Todo"
-          value={filteredTasks?.filter((t) => t.status === "todo").length ?? 0}
-        />
-        <StatCard
-          label="In Progress"
-          value={filteredTasks?.filter((t) => t.status === "in_progress").length ?? 0}
-        />
-        <StatCard
-          label="Done"
-          value={filteredTasks?.filter((t) => t.status === "done").length ?? 0}
-        />
-      </div>
-
-      {/* Create/Edit Task Modal */}
-      <CreateTaskModal
-        isOpen={isModalOpen}
-        onClose={handleCloseModal}
-        projects={projects ?? []}
-        prefilledDate={modalPrefilledDate}
-        prefilledProjectId={modalPrefilledProjectId}
-        anchorElement={modalAnchorElement}
-        task={editingTask ?? undefined}
+      {/* HUD overlay — fixed, unaffected by transform */}
+      <HUD
+        viewMode={viewMode}
+        scale={transform.scale}
       />
     </div>
   );
 }
 
-// Hook to detect prefers-reduced-motion
-function usePrefersReducedMotion() {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+// ---------- Backlog Zone ----------
 
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReducedMotion(mediaQuery.matches);
-
-    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
-  }, []);
-
-  return prefersReducedMotion;
-}
-
-// Animation constants
-const taskCardVariants = {
-  initial: { opacity: 0, y: 6 },
-  animate: { opacity: 1, y: 0 },
-};
-
-const taskCardTransition = {
-  type: "spring" as const,
-  stiffness: 400,
-  damping: 25,
-  duration: 0.35,
-};
-
-const taskCardHover = {
-  scale: 1.01,
-  y: -4,
-  transition: { type: "spring" as const, stiffness: 400, damping: 20 },
-};
-
-function TaskCard({
-  task,
-  onClick,
+function BacklogZone({
+  tasks,
+  viewMode,
+  expandedTaskId,
+  onToggleExpand,
+  groupByProject,
 }: {
-  task: Task;
-  onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
+  tasks: MockTask[];
+  viewMode: ViewMode;
+  expandedTaskId: string | null;
+  onToggleExpand: (id: string | null) => void;
+  groupByProject: (tasks: MockTask[]) => Record<string, MockTask[]>;
 }) {
-  const prefersReducedMotion = usePrefersReducedMotion();
+  if (tasks.length === 0) return null;
+  const groups = groupByProject(tasks);
 
-  const statusStyles: Record<string, { bg: string; indicator: string }> = {
-    todo: { bg: "bg-gray-50 border-gray-200", indicator: "bg-gray-400" },
-    in_progress: { bg: "bg-gray-50 border-gray-300", indicator: "bg-gray-900" },
-    done: { bg: "bg-gray-50 border-gray-200", indicator: "bg-gray-300" },
-    blocked: { bg: "bg-red-50 border-red-200", indicator: "bg-red-400" },
-  };
+  return (
+    <div
+      className="absolute"
+      style={{ left: BACKLOG_X, top: 0, width: LANE_WIDTH }}
+    >
+      {/* Lane label */}
+      <div className="mb-4 flex items-center gap-3">
+        <span className="text-lg font-semibold text-white/40 tracking-wide">
+          BACKLOG
+        </span>
+        <span className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-white/30">
+          {tasks.length}
+        </span>
+      </div>
 
-  const style = statusStyles[task.status] ?? statusStyles.todo;
+      {/* Subtle lane divider */}
+      <div className="absolute left-[-20px] top-0 h-[2000px] w-px bg-white/[0.04]" />
 
-  const cardContent = (
-    <div className="flex items-center gap-1.5">
-      <span className={`h-1.5 w-1.5 rounded-full ${style.indicator}`} />
-      <span className="truncate font-medium text-gray-900" title={task.title}>
-        {task.title}
-      </span>
+      <div style={{ paddingTop: LANE_TOP_PADDING }}>
+        {Object.entries(groups).map(([projectId, projectTasks]) => (
+          <ProjectCluster
+            key={projectId}
+            projectId={projectId}
+            tasks={projectTasks}
+            viewMode={viewMode}
+            expandedTaskId={expandedTaskId}
+            onToggleExpand={onToggleExpand}
+          />
+        ))}
+      </div>
     </div>
   );
+}
 
-  // Render static div if user prefers reduced motion
-  if (prefersReducedMotion) {
+// ---------- Day Lane ----------
+
+function DayLane({
+  date,
+  dateKey: _dateKey,
+  x,
+  tasks,
+  viewMode,
+  expandedTaskId,
+  onToggleExpand,
+  groupByProject,
+}: {
+  date: Date;
+  dateKey: string;
+  x: number;
+  tasks: MockTask[];
+  viewMode: ViewMode;
+  expandedTaskId: string | null;
+  onToggleExpand: (id: string | null) => void;
+  groupByProject: (tasks: MockTask[]) => Record<string, MockTask[]>;
+}) {
+  const today = isToday(date);
+  const groups = groupByProject(tasks);
+
+  if (viewMode === "month") {
     return (
-      <div
-        className={`cursor-pointer rounded-md border p-2 text-xs ${style.bg}`}
-        onClick={onClick}
-      >
-        {cardContent}
-      </div>
+      <MonthDayBlock date={date} x={x} tasks={tasks} today={today} />
     );
   }
 
   return (
-    <motion.div
-      className={`cursor-pointer rounded-md border p-2 text-xs ${style.bg}`}
-      onClick={onClick}
-      variants={taskCardVariants}
-      initial="initial"
-      animate="animate"
-      transition={taskCardTransition}
-      whileHover={taskCardHover}
+    <div
+      className="absolute"
+      style={{ left: x, top: 0, width: LANE_WIDTH }}
     >
-      {cardContent}
+      {/* Lane divider */}
+      <div
+        className="absolute left-[-20px] top-0 h-[2000px] w-px"
+        style={{
+          background: today
+            ? "linear-gradient(180deg, rgba(99,102,241,0.5) 0%, rgba(99,102,241,0) 100%)"
+            : "rgba(255,255,255,0.04)",
+        }}
+      />
+
+      {/* Today glow line */}
+      {today && (
+        <div className="absolute left-0 top-0 h-1 w-full rounded-full bg-indigo-500/60 shadow-[0_0_20px_rgba(99,102,241,0.4)]" />
+      )}
+
+      {/* Day label */}
+      <div className="mb-2 flex items-center gap-3">
+        <span
+          className={`text-lg font-semibold tracking-wide ${
+            today ? "text-indigo-400" : "text-white/40"
+          }`}
+        >
+          {formatDayLabel(date)}
+        </span>
+        <span className="text-xs text-white/20">{formatMonthDay(date)}</span>
+        {today && (
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-indigo-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-indigo-500" />
+          </span>
+        )}
+        {tasks.length > 0 && (
+          <span className="rounded-full bg-white/5 px-2 py-0.5 text-xs text-white/30">
+            {tasks.length}
+          </span>
+        )}
+      </div>
+
+      {/* Project clusters */}
+      <div style={{ paddingTop: LANE_TOP_PADDING }}>
+        {Object.entries(groups).map(([projectId, projectTasks]) => (
+          <ProjectCluster
+            key={projectId}
+            projectId={projectId}
+            tasks={projectTasks}
+            viewMode={viewMode}
+            expandedTaskId={expandedTaskId}
+            onToggleExpand={onToggleExpand}
+          />
+        ))}
+
+        {tasks.length === 0 && (
+          <div className="flex h-24 items-center justify-center rounded-xl border border-dashed border-white/[0.06] text-xs text-white/15">
+            No tasks
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Month Day Block (zoomed-out summary) ----------
+
+function MonthDayBlock({
+  date,
+  x,
+  tasks,
+  today,
+}: {
+  date: Date;
+  x: number;
+  tasks: MockTask[];
+  today: boolean;
+}) {
+  const projectCounts: Record<string, number> = {};
+  tasks.forEach((t) => {
+    projectCounts[t.project_id] = (projectCounts[t.project_id] ?? 0) + 1;
+  });
+
+  return (
+    <div
+      className="absolute"
+      style={{ left: x, top: 0, width: LANE_WIDTH }}
+    >
+      <div
+        className={`rounded-xl border p-4 ${
+          today
+            ? "border-indigo-500/30 bg-indigo-500/[0.06]"
+            : "border-white/[0.06] bg-white/[0.02]"
+        }`}
+        style={{ minHeight: 80 }}
+      >
+        <div className="mb-2 text-sm font-medium text-white/50">
+          {formatMonthDay(date)}
+        </div>
+        {Object.entries(projectCounts).map(([pid, count]) => {
+          const colors = PROJECT_COLORS[pid];
+          return (
+            <div key={pid} className="mb-1 flex items-center gap-2">
+              <div
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: colors?.accent ?? "#666" }}
+              />
+              <span className="text-xs text-white/40">
+                {MOCK_PROJECTS.find((p) => p.id === pid)?.name} — {count}
+              </span>
+            </div>
+          );
+        })}
+        {tasks.length === 0 && (
+          <span className="text-xs text-white/15">empty</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Project Cluster ----------
+
+function ProjectCluster({
+  projectId,
+  tasks,
+  viewMode,
+  expandedTaskId,
+  onToggleExpand,
+}: {
+  projectId: string;
+  tasks: MockTask[];
+  viewMode: ViewMode;
+  expandedTaskId: string | null;
+  onToggleExpand: (id: string | null) => void;
+}) {
+  const project = MOCK_PROJECTS.find((p) => p.id === projectId);
+  const colors = PROJECT_COLORS[projectId] ?? {
+    accent: "#666",
+    glass: "rgba(102,102,102,0.12)",
+    glow: "rgba(102,102,102,0.3)",
+    text: "#999",
+  };
+
+  return (
+    <div className="mb-6">
+      {/* Project label */}
+      <div className="mb-2 flex items-center gap-2">
+        <div
+          className="h-2 w-2 rounded-full"
+          style={{ backgroundColor: colors.accent }}
+        />
+        <span className="text-xs font-medium" style={{ color: colors.text }}>
+          {project?.name ?? "Unknown"}
+        </span>
+      </div>
+
+      {/* Cards */}
+      <div className="flex flex-col" style={{ gap: CARD_GAP }}>
+        {tasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            colors={colors}
+            viewMode={viewMode}
+            isExpanded={expandedTaskId === task.id}
+            onToggle={() =>
+              onToggleExpand(expandedTaskId === task.id ? null : task.id)
+            }
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Task Card ----------
+
+function TaskCard({
+  task,
+  colors,
+  viewMode,
+  isExpanded,
+  onToggle,
+}: {
+  task: MockTask;
+  colors: { accent: string; glass: string; glow: string; text: string };
+  viewMode: ViewMode;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const showDetail = viewMode === "detail" || isExpanded;
+
+  return (
+    <motion.div
+      data-card
+      layout
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      className="relative cursor-pointer select-none overflow-hidden rounded-xl border"
+      style={{
+        width: CARD_WIDTH,
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        background: colors.glass,
+        borderColor: "rgba(255,255,255,0.08)",
+        boxShadow: isExpanded
+          ? `0 0 24px ${colors.glow}, 0 4px 30px rgba(0,0,0,0.4)`
+          : `0 0 12px ${colors.glow.replace("0.3", "0.1")}, 0 2px 12px rgba(0,0,0,0.3)`,
+      }}
+      whileHover={{
+        boxShadow: `0 0 20px ${colors.glow}, 0 4px 24px rgba(0,0,0,0.4)`,
+        scale: 1.02,
+        transition: { duration: 0.2 },
+      }}
+      transition={{ layout: { duration: 0.25, ease: "easeOut" } }}
+    >
+      <div className="p-3">
+        {/* Top row: status dot + title */}
+        <div className="flex items-start gap-2">
+          <span
+            className="mt-1 h-2 w-2 shrink-0 rounded-full"
+            style={{ backgroundColor: STATUS_DOTS[task.status] ?? "#666" }}
+          />
+          <span
+            className="text-sm font-medium leading-snug"
+            style={{ color: colors.text }}
+          >
+            {task.title}
+          </span>
+        </div>
+
+        {/* Hours badge */}
+        {task.estimated_hours && (
+          <div className="mt-2 flex items-center gap-1">
+            <span className="rounded-md bg-white/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-white/30">
+              {task.estimated_hours}h
+            </span>
+            {task.status === "blocked" && (
+              <span className="rounded-md bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-400/60">
+                blocked
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Detail view: description + status + priority */}
+        <AnimatePresence>
+          {showDetail && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden"
+            >
+              {task.description && (
+                <p className="mt-2 text-xs leading-relaxed text-white/25">
+                  {task.description}
+                </p>
+              )}
+              <div className="mt-2 flex items-center gap-2 text-[10px] text-white/20">
+                <span>
+                  Priority {task.priority}
+                </span>
+                <span className="text-white/10">|</span>
+                <span className="capitalize">
+                  {task.status.replace("_", " ")}
+                </span>
+                {task.due_date && (
+                  <>
+                    <span className="text-white/10">|</span>
+                    <span>Due {task.due_date}</span>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Bottom accent bar */}
+      <div
+        className="h-0.5 w-full"
+        style={{
+          background: `linear-gradient(90deg, ${colors.accent}40 0%, transparent 100%)`,
+        }}
+      />
     </motion.div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+// ---------- HUD Overlay ----------
+
+function HUD({
+  viewMode,
+  scale,
+}: {
+  viewMode: ViewMode;
+  scale: number;
+}) {
+  const viewLabel =
+    viewMode === "detail"
+      ? "Detail"
+      : viewMode === "month"
+        ? "Month"
+        : "Week";
+
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">{value}</div>
+    <>
+      {/* Zoom indicator — top right */}
+      <div className="pointer-events-none absolute right-6 top-6 flex items-center gap-3">
+        <span className="rounded-lg bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/30 backdrop-blur-sm">
+          {Math.round(scale * 100)}%
+        </span>
+        <span className="rounded-lg bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-white/30 backdrop-blur-sm">
+          {viewLabel} view
+        </span>
+      </div>
+
+      {/* Project legend — bottom left */}
+      <div className="pointer-events-none absolute bottom-6 left-6 flex flex-col gap-2 rounded-xl bg-black/40 p-3 backdrop-blur-md">
+        {MOCK_PROJECTS.map((p) => {
+          const colors = PROJECT_COLORS[p.id];
+          return (
+            <div key={p.id} className="flex items-center gap-2">
+              <div
+                className="h-2.5 w-2.5 rounded-full"
+                style={{ backgroundColor: colors?.accent ?? "#666" }}
+              />
+              <span className="text-xs text-white/40">{p.name}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Keyboard hint — bottom right */}
+      <div className="pointer-events-none absolute bottom-6 right-6 rounded-xl bg-black/40 p-3 backdrop-blur-md">
+        <div className="flex flex-col gap-1 text-[10px] text-white/20">
+          <span>Scroll to zoom</span>
+          <span>Drag to pan</span>
+          <span>Click card to expand</span>
+          <span>Ctrl+0 reset view</span>
+          <span>Esc close detail</span>
+        </div>
+      </div>
+
+      {/* Minimap — bottom center-right */}
+      <Minimap />
+    </>
+  );
+}
+
+// ---------- Minimap ----------
+
+function Minimap() {
+  // Simple static minimap showing the overall canvas extent
+  // In a real build this would reflect actual viewport position
+  return (
+    <div className="pointer-events-none absolute bottom-6 right-40 h-16 w-28 rounded-lg border border-white/[0.06] bg-black/40 backdrop-blur-md">
+      {/* Dots representing day lanes */}
+      <div className="flex h-full items-center justify-center gap-1 px-2">
+        {Array.from({ length: 7 }).map((_, i) => (
+          <div
+            key={i}
+            className={`h-6 w-1 rounded-full ${
+              i === 2 ? "bg-indigo-500/40" : "bg-white/[0.08]"
+            }`}
+          />
+        ))}
+      </div>
+      <div className="absolute inset-x-0 bottom-0.5 text-center text-[8px] text-white/15">
+        minimap
+      </div>
     </div>
   );
 }
