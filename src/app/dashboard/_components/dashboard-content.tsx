@@ -1,445 +1,575 @@
+// PROTOTYPE: Using mock data. Will connect to tRPC in production.
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { api } from "import-alias/trpc/react";
-import type { AppRouter } from "import-alias/server/api/root";
-import type { inferRouterOutputs } from "@trpc/server";
-import { CreateTaskModal } from "./create-task-modal";
-import { motion } from "framer-motion";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  MOCK_TASKS,
+  MOCK_PROJECTS,
+  PROJECT_COLORS,
+  type MockTask,
+} from "./mock-data";
 
-type RouterOutputs = inferRouterOutputs<AppRouter>;
-type Task = RouterOutputs["tasks"]["list"][number];
-type Project = RouterOutputs["projects"]["list"][number];
-type User = RouterOutputs["users"]["list"][number];
+// ── Types ──────────────────────────────────────────────────────────────────────
 
 interface DashboardContentProps {
-  currentUser: User;
+  currentUser: { id: string; display_name: string; role: string; [key: string]: unknown };
 }
 
-// Get current week dates (Mon-Sun)
-function getWeekDates() {
+type TimeHorizon = "today" | "this_week" | "this_month" | "later";
+
+interface PlacedTask extends MockTask {
+  horizon: TimeHorizon;
+  angle: number; // radians
+  radius: number; // 0-1 normalized
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+const RING_RADII = {
+  today: 0.2,
+  this_week: 0.42,
+  this_month: 0.64,
+  later: 0.84,
+} as const;
+
+const RING_LABELS: Record<TimeHorizon, string> = {
+  today: "TODAY",
+  this_week: "THIS WEEK",
+  this_month: "THIS MONTH",
+  later: "LATER",
+};
+
+const STATUS_OPACITY: Record<string, number> = {
+  in_progress: 1,
+  todo: 0.75,
+  blocked: 0.85,
+  done: 0.3,
+};
+
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 3.0;
+const ZOOM_SPEED = 0.002;
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+function classifyHorizon(dueDate: string | null): TimeHorizon {
+  if (!dueDate) return "later";
   const today = new Date();
-  const currentDay = today.getDay();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - (currentDay === 0 ? 6 : currentDay - 1));
-
-  const week = [];
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(monday);
-    date.setDate(monday.getDate() + i);
-    week.push(date);
-  }
-  return week;
-}
-
-function formatDate(date: Date) {
-  // Use local date to avoid timezone issues
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function formatDayLabel(date: Date) {
-  return date.toLocaleDateString("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-export function DashboardContent({ currentUser }: DashboardContentProps) {
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    null,
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(dueDate + "T00:00:00");
+  const diffDays = Math.floor(
+    (due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
   );
-  const [selectedStatuses, setSelectedStatuses] = useState<string[]>([]);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalPrefilledDate, setModalPrefilledDate] = useState<
-    string | undefined
-  >();
-  const [modalPrefilledProjectId, setModalPrefilledProjectId] = useState<
-    string | undefined
-  >();
-  const [modalAnchorElement, setModalAnchorElement] = useState<
-    HTMLElement | null
-  >(null);
-  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  if (diffDays <= 0) return "today";
+  if (diffDays <= 7) return "this_week";
+  if (diffDays <= 30) return "this_month";
+  return "later";
+}
 
-  const isAdmin = currentUser.role === "admin";
+function placeTasks(tasks: MockTask[]): PlacedTask[] {
+  const grouped: Record<TimeHorizon, MockTask[]> = {
+    today: [],
+    this_week: [],
+    this_month: [],
+    later: [],
+  };
 
-  // Fetch data
-  const { data: tasks, isLoading: tasksLoading } = api.tasks.list.useQuery({
-    projectId: selectedProjectId ?? undefined,
-    status: selectedStatuses.length > 0 ? selectedStatuses : undefined,
+  tasks.forEach((t) => {
+    const h = classifyHorizon(t.due_date);
+    grouped[h].push(t);
   });
 
-  const { data: projects, isLoading: projectsLoading } =
-    api.projects.list.useQuery();
+  const placed: PlacedTask[] = [];
 
-  const { data: users, isLoading: usersLoading } = api.users.list.useQuery();
-
-  const weekDates = useMemo(() => getWeekDates(), []);
-
-  // Filter tasks by selected user (admin only)
-  const filteredTasks = useMemo(() => {
-    if (!tasks) return [];
-    if (!isAdmin || !selectedUserId) return tasks;
-
-    return tasks.filter((task) => task.created_by === selectedUserId);
-  }, [tasks, isAdmin, selectedUserId]);
-
-  // Group tasks by project
-  const tasksByProject = useMemo(() => {
-    const grouped = new Map<string, Task[]>();
-    filteredTasks.forEach((task) => {
-      const projectId = task.project_id ?? "unassigned";
-      if (!grouped.has(projectId)) {
-        grouped.set(projectId, []);
-      }
-      grouped.get(projectId)!.push(task);
+  (Object.keys(grouped) as TimeHorizon[]).forEach((horizon) => {
+    const ring = grouped[horizon];
+    const baseRadius = RING_RADII[horizon];
+    ring.forEach((task, i) => {
+      const angleStep = (2 * Math.PI) / Math.max(ring.length, 1);
+      // Offset so tasks don't all start at 12 o'clock
+      const angle = angleStep * i - Math.PI / 2 + (Math.PI / 12) * (horizon === "today" ? 0 : 1);
+      // Add slight radial jitter for visual interest
+      const jitter = (Math.sin(i * 7.3 + task.id.charCodeAt(1)) * 0.03);
+      placed.push({
+        ...task,
+        horizon,
+        angle,
+        radius: baseRadius + jitter,
+      });
     });
-    return grouped;
-  }, [filteredTasks]);
+  });
 
-  // Get task for specific day
-  const getTasksForDay = (projectTasks: Task[], date: Date) => {
-    const dateStr = formatDate(date);
-    return projectTasks.filter((task) => {
-      // Show task if it's due on this day or scheduled to start
-      return task.due_date === dateStr || task.start_date === dateStr;
-    });
-  };
-
-  const handleOpenModal = (
-    e: React.MouseEvent<HTMLButtonElement>,
-    date: Date,
-    projectId?: string,
-  ) => {
-    setModalAnchorElement(e.currentTarget);
-    setModalPrefilledDate(formatDate(date));
-    setModalPrefilledProjectId(projectId);
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-    setModalPrefilledDate(undefined);
-    setModalPrefilledProjectId(undefined);
-    setModalAnchorElement(null);
-    setEditingTask(null);
-  };
-
-  const handleTaskClick = (e: React.MouseEvent<HTMLDivElement>, task: Task) => {
-    setModalAnchorElement(e.currentTarget);
-    setEditingTask(task);
-    setIsModalOpen(true);
-  };
-
-  if (tasksLoading || projectsLoading || usersLoading) {
-    return <div>Loading...</div>;
-  }
-
-  const statusOptions = ["todo", "in_progress", "done", "blocked"];
-
-  return (
-    <div className="space-y-6">
-      {/* Filters */}
-      <div className="flex items-center gap-6 rounded-lg border border-gray-200 bg-white p-4">
-        <div className="flex-1">
-          <label className="mb-1.5 block text-xs font-medium text-gray-500">
-            Project
-          </label>
-          <select
-            className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
-            value={selectedProjectId ?? ""}
-            onChange={(e) => setSelectedProjectId(e.target.value || null)}
-          >
-            <option value="">All Projects</option>
-            {projects?.map((project) => (
-              <option key={project.id} value={project.id}>
-                {project.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {isAdmin && (
-          <div className="flex-1">
-            <label className="mb-1.5 block text-xs font-medium text-gray-500">
-              User
-            </label>
-            <select
-              className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm text-gray-900 focus:border-gray-900 focus:outline-none"
-              value={selectedUserId ?? ""}
-              onChange={(e) => setSelectedUserId(e.target.value || null)}
-            >
-              <option value="">All Users</option>
-              {users?.map((user) => (
-                <option key={user.id} value={user.id}>
-                  {user.display_name} ({user.role})
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
-        <div className="flex-1">
-          <label className="mb-1.5 block text-xs font-medium text-gray-500">
-            Status
-          </label>
-          <div className="flex flex-wrap gap-3">
-            {statusOptions.map((status) => (
-              <label key={status} className="flex cursor-pointer items-center gap-1.5 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={selectedStatuses.includes(status)}
-                  onChange={(e) => {
-                    if (e.target.checked) {
-                      setSelectedStatuses([...selectedStatuses, status]);
-                    } else {
-                      setSelectedStatuses(
-                        selectedStatuses.filter((s) => s !== status),
-                      );
-                    }
-                  }}
-                  className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-                />
-                {status.replace("_", " ")}
-              </label>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Week View */}
-      <div className="overflow-hidden rounded-lg border bg-white">
-        {/* Week Header */}
-        <div className="grid grid-cols-8 border-b border-gray-200 bg-gray-50">
-          <div className="border-r border-gray-200 p-4 text-sm font-medium text-gray-600">
-            Project
-          </div>
-          {weekDates.map((date, i) => (
-            <div
-              key={i}
-              className={`p-4 text-center text-sm font-medium ${
-                date.toDateString() === new Date().toDateString()
-                  ? "bg-gray-900 text-white"
-                  : "text-gray-600"
-              }`}
-            >
-              {formatDayLabel(date)}
-            </div>
-          ))}
-        </div>
-
-        {/* Tasks grouped by project */}
-        {Array.from(tasksByProject.entries()).map(
-          ([projectId, projectTasks]) => {
-            const project = projects?.find((p) => p.id === projectId);
-            const projectName = project?.name ?? "Unassigned";
-
-            return (
-              <div key={projectId} className="border-b border-gray-200 last:border-b-0">
-                <div className="grid grid-cols-8">
-                  {/* Project Name */}
-                  <div className="flex items-start border-r border-gray-200 bg-gray-50 p-4">
-                    <span className="text-sm font-medium text-gray-900">{projectName}</span>
-                    <span className="ml-2 text-xs text-gray-400">
-                      {projectTasks.length}
-                    </span>
-                  </div>
-
-                  {/* Days */}
-                  {weekDates.map((date, dayIndex) => {
-                    const dayTasks = getTasksForDay(projectTasks, date);
-
-                    return (
-                      <div
-                        key={dayIndex}
-                        className={`group relative min-h-[100px] border-l border-gray-100 p-2 ${
-                          date.toDateString() === new Date().toDateString()
-                            ? "bg-gray-50"
-                            : ""
-                        }`}
-                      >
-                        <div className="space-y-1">
-                          {dayTasks.map((task) => (
-                            <TaskCard
-                              key={task.id}
-                              task={task}
-                              onClick={(e) => handleTaskClick(e, task)}
-                            />
-                          ))}
-                        </div>
-
-                        {/* Add Task Button */}
-                        <button
-                          onClick={(e) =>
-                            handleOpenModal(
-                              e,
-                              date,
-                              projectId !== "unassigned" ? projectId : undefined,
-                            )
-                          }
-                          className="absolute bottom-1 right-1 rounded-md bg-gray-900 p-1 text-white opacity-0 transition-opacity hover:bg-gray-800 group-hover:opacity-100"
-                          title="Add task"
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M12 4v16m8-8H4"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          },
-        )}
-
-        {tasksByProject.size === 0 && (
-          <div className="p-8 text-center text-gray-500">
-            No tasks found. Try adjusting your filters.
-          </div>
-        )}
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard label="Total Tasks" value={filteredTasks?.length ?? 0} />
-        <StatCard
-          label="Todo"
-          value={filteredTasks?.filter((t) => t.status === "todo").length ?? 0}
-        />
-        <StatCard
-          label="In Progress"
-          value={filteredTasks?.filter((t) => t.status === "in_progress").length ?? 0}
-        />
-        <StatCard
-          label="Done"
-          value={filteredTasks?.filter((t) => t.status === "done").length ?? 0}
-        />
-      </div>
-
-      {/* Create/Edit Task Modal */}
-      <CreateTaskModal
-        isOpen={isModalOpen}
-        onClose={handleCloseModal}
-        projects={projects ?? []}
-        prefilledDate={modalPrefilledDate}
-        prefilledProjectId={modalPrefilledProjectId}
-        anchorElement={modalAnchorElement}
-        task={editingTask ?? undefined}
-      />
-    </div>
-  );
+  return placed;
 }
 
-// Hook to detect prefers-reduced-motion
-function usePrefersReducedMotion() {
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+// ── Component ──────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setPrefersReducedMotion(mediaQuery.matches);
+export function DashboardContent({ currentUser: _currentUser }: DashboardContentProps) {
+  const [zoom, setZoom] = useState(1);
+  const [hoveredTask, setHoveredTask] = useState<PlacedTask | null>(null);
+  const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
 
-    const handler = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
-    mediaQuery.addEventListener("change", handler);
-    return () => mediaQuery.removeEventListener("change", handler);
+  // Filter out done tasks from main view? No — show them dimmed.
+  const activeTasks = useMemo(() => {
+    if (selectedProject) {
+      return MOCK_TASKS.filter((t) => t.project_id === selectedProject);
+    }
+    return MOCK_TASKS;
+  }, [selectedProject]);
+
+  const placedTasks = useMemo(() => placeTasks(activeTasks), [activeTasks]);
+
+  const unscheduledTasks = useMemo(
+    () => activeTasks.filter((t) => t.due_date === null),
+    [activeTasks]
+  );
+
+  // Zoom via scroll
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    setZoom((prev) => {
+      const next = prev + e.deltaY * ZOOM_SPEED;
+      return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
+    });
   }, []);
 
-  return prefersReducedMotion;
-}
+  // SVG viewbox dimensions
+  const viewSize = 800;
+  const center = viewSize / 2;
 
-// Animation constants
-const taskCardVariants = {
-  initial: { opacity: 0, y: 6 },
-  animate: { opacity: 1, y: 0 },
-};
+  // Convert polar to SVG cartesian
+  const toXY = (angle: number, radius: number) => ({
+    x: center + Math.cos(angle) * radius * center * 0.95,
+    y: center + Math.sin(angle) * radius * center * 0.95,
+  });
 
-const taskCardTransition = {
-  type: "spring" as const,
-  stiffness: 400,
-  damping: 25,
-  duration: 0.35,
-};
-
-const taskCardHover = {
-  scale: 1.01,
-  y: -4,
-  transition: { type: "spring" as const, stiffness: 400, damping: 20 },
-};
-
-function TaskCard({
-  task,
-  onClick,
-}: {
-  task: Task;
-  onClick: (e: React.MouseEvent<HTMLDivElement>) => void;
-}) {
-  const prefersReducedMotion = usePrefersReducedMotion();
-
-  const statusStyles: Record<string, { bg: string; indicator: string }> = {
-    todo: { bg: "bg-gray-50 border-gray-200", indicator: "bg-gray-400" },
-    in_progress: { bg: "bg-gray-50 border-gray-300", indicator: "bg-gray-900" },
-    done: { bg: "bg-gray-50 border-gray-200", indicator: "bg-gray-300" },
-    blocked: { bg: "bg-red-50 border-red-200", indicator: "bg-red-400" },
+  // Handle hover
+  const handleMouseEnter = (task: PlacedTask, e: React.MouseEvent) => {
+    setHoveredTask(task);
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (rect) {
+      setTooltipPos({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      });
+    }
   };
 
-  const style = statusStyles[task.status] ?? statusStyles.todo;
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (hoveredTask) {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        setTooltipPos({
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        });
+      }
+    }
+  };
 
-  const cardContent = (
-    <div className="flex items-center gap-1.5">
-      <span className={`h-1.5 w-1.5 rounded-full ${style.indicator}`} />
-      <span className="truncate font-medium text-gray-900" title={task.title}>
-        {task.title}
-      </span>
-    </div>
-  );
+  const handleMouseLeave = () => {
+    setHoveredTask(null);
+  };
 
-  // Render static div if user prefers reduced motion
-  if (prefersReducedMotion) {
-    return (
-      <div
-        className={`cursor-pointer rounded-md border p-2 text-xs ${style.bg}`}
-        onClick={onClick}
-      >
-        {cardContent}
+  const handleTaskClick = (task: PlacedTask) => {
+    console.log("[Orbital] Task clicked:", task.title, task);
+  };
+
+  // Node size based on estimated hours
+  const getNodeSize = (task: MockTask) => {
+    const base = 6;
+    const hours = task.estimated_hours ?? 2;
+    return base + Math.min(hours, 15) * 0.6;
+  };
+
+  // Ring descriptions for SVG
+  const rings: { horizon: TimeHorizon; radius: number }[] = [
+    { horizon: "today", radius: RING_RADII.today },
+    { horizon: "this_week", radius: RING_RADII.this_week },
+    { horizon: "this_month", radius: RING_RADII.this_month },
+    { horizon: "later", radius: RING_RADII.later },
+  ];
+
+  // Prevent page scroll when wheeling over the orbital
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const prevent = (e: WheelEvent) => e.preventDefault();
+    el.addEventListener("wheel", prevent, { passive: false });
+    return () => el.removeEventListener("wheel", prevent);
+  }, []);
+
+  return (
+    <div className="orbital-container font-mono" style={{ background: "#0a0a0f" }}>
+      {/* Project legend + filter */}
+      <div className="flex items-center justify-between px-6 pt-4 pb-2">
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setSelectedProject(null)}
+            className={`rounded-full border px-3 py-1 text-xs tracking-wider transition-colors ${
+              selectedProject === null
+                ? "border-white/30 bg-white/10 text-white"
+                : "border-white/10 text-white/40 hover:text-white/70"
+            }`}
+          >
+            ALL
+          </button>
+          {MOCK_PROJECTS.map((p) => {
+            const colors = PROJECT_COLORS[p.id];
+            const isActive = selectedProject === p.id;
+            return (
+              <button
+                key={p.id}
+                onClick={() =>
+                  setSelectedProject(isActive ? null : p.id)
+                }
+                className="flex items-center gap-2 rounded-full border px-3 py-1 text-xs tracking-wider transition-colors"
+                style={{
+                  borderColor: isActive ? colors?.accent : "rgba(255,255,255,0.1)",
+                  background: isActive ? colors?.muted : "transparent",
+                  color: isActive ? colors?.accent : "rgba(255,255,255,0.4)",
+                }}
+              >
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ background: colors?.accent }}
+                />
+                {p.name}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-3 text-xs text-white/30">
+          <span>ZOOM {(zoom * 100).toFixed(0)}%</span>
+          <span className="text-white/15">|</span>
+          <span>{activeTasks.length} tasks</span>
+        </div>
       </div>
-    );
-  }
 
-  return (
-    <motion.div
-      className={`cursor-pointer rounded-md border p-2 text-xs ${style.bg}`}
-      onClick={onClick}
-      variants={taskCardVariants}
-      initial="initial"
-      animate="animate"
-      transition={taskCardTransition}
-      whileHover={taskCardHover}
-    >
-      {cardContent}
-    </motion.div>
-  );
-}
+      {/* Orbital SVG */}
+      <div
+        ref={containerRef}
+        className="relative mx-auto flex items-center justify-center overflow-hidden"
+        style={{ height: "calc(100vh - 180px)", maxHeight: "900px" }}
+        onWheel={handleWheel}
+        onMouseMove={handleMouseMove}
+      >
+        <svg
+          ref={svgRef}
+          viewBox={`0 0 ${viewSize} ${viewSize}`}
+          className="h-full w-full transition-transform duration-300 ease-out"
+          style={{
+            transform: `scale(${zoom})`,
+            maxWidth: "900px",
+            maxHeight: "900px",
+          }}
+        >
+          {/* Background grid — subtle radial lines */}
+          {Array.from({ length: 24 }).map((_, i) => {
+            const angle = (i / 24) * Math.PI * 2 - Math.PI / 2;
+            const outer = toXY(angle, 0.98);
+            return (
+              <line
+                key={`grid-${i}`}
+                x1={center}
+                y1={center}
+                x2={outer.x}
+                y2={outer.y}
+                stroke="rgba(255,255,255,0.03)"
+                strokeWidth={0.5}
+              />
+            );
+          })}
 
-function StatCard({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
-      <div className="text-xs font-medium text-gray-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tracking-tight text-gray-900">{value}</div>
+          {/* Orbital rings */}
+          {rings.map(({ horizon, radius }) => (
+            <g key={horizon}>
+              {/* Ring circle */}
+              <circle
+                cx={center}
+                cy={center}
+                r={radius * center * 0.95}
+                fill="none"
+                stroke={
+                  horizon === "today"
+                    ? "rgba(255,255,255,0.15)"
+                    : "rgba(255,255,255,0.06)"
+                }
+                strokeWidth={horizon === "today" ? 1.5 : 0.8}
+                strokeDasharray={
+                  horizon === "later" ? "4 4" : undefined
+                }
+              />
+              {/* Ring label */}
+              <text
+                x={center + radius * center * 0.95 + 8}
+                y={center - 4}
+                fill={
+                  horizon === "today"
+                    ? "rgba(255,255,255,0.35)"
+                    : "rgba(255,255,255,0.15)"
+                }
+                fontSize={horizon === "today" ? 10 : 8}
+                fontFamily="monospace"
+                letterSpacing="0.1em"
+              >
+                {RING_LABELS[horizon]}
+              </text>
+            </g>
+          ))}
+
+          {/* Center point — "NOW" */}
+          <circle
+            cx={center}
+            cy={center}
+            r={4}
+            fill="rgba(255,255,255,0.6)"
+          >
+            <animate
+              attributeName="r"
+              values="3;5;3"
+              dur="3s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.6;1;0.6"
+              dur="3s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          <text
+            x={center}
+            y={center + 16}
+            textAnchor="middle"
+            fill="rgba(255,255,255,0.3)"
+            fontSize={7}
+            fontFamily="monospace"
+            letterSpacing="0.15em"
+          >
+            NOW
+          </text>
+
+          {/* Task nodes */}
+          {placedTasks.map((task) => {
+            if (task.due_date === null) return null; // unscheduled handled separately
+            const pos = toXY(task.angle, task.radius);
+            const colors = PROJECT_COLORS[task.project_id];
+            const size = getNodeSize(task);
+            const opacity = STATUS_OPACITY[task.status] ?? 0.5;
+            const isBlocked = task.status === "blocked";
+            const isInProgress = task.status === "in_progress";
+            const isDone = task.status === "done";
+            const isHovered = hoveredTask?.id === task.id;
+
+            return (
+              <g
+                key={task.id}
+                className="cursor-pointer"
+                onMouseEnter={(e) => handleMouseEnter(task, e)}
+                onMouseLeave={handleMouseLeave}
+                onClick={() => handleTaskClick(task)}
+                style={{ opacity }}
+              >
+                {/* Glow effect for active tasks */}
+                {isInProgress && (
+                  <circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={size + 6}
+                    fill={colors?.glow ?? "rgba(255,255,255,0.2)"}
+                  >
+                    <animate
+                      attributeName="r"
+                      values={`${size + 4};${size + 10};${size + 4}`}
+                      dur="2.5s"
+                      repeatCount="indefinite"
+                    />
+                    <animate
+                      attributeName="opacity"
+                      values="0.6;0.2;0.6"
+                      dur="2.5s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                )}
+
+                {/* Blocked indicator — pulsing red ring */}
+                {isBlocked && (
+                  <circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={size + 4}
+                    fill="none"
+                    stroke="rgba(239, 68, 68, 0.6)"
+                    strokeWidth={1.5}
+                    strokeDasharray="3 2"
+                  >
+                    <animate
+                      attributeName="opacity"
+                      values="0.8;0.3;0.8"
+                      dur="1.8s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                )}
+
+                {/* Main node */}
+                <circle
+                  cx={pos.x}
+                  cy={pos.y}
+                  r={isHovered ? size + 2 : size}
+                  fill={isDone ? "rgba(255,255,255,0.15)" : (colors?.accent ?? "#fff")}
+                  stroke={isHovered ? "#fff" : "none"}
+                  strokeWidth={isHovered ? 1 : 0}
+                  style={{
+                    transition: "r 0.2s ease, stroke-width 0.2s ease",
+                    filter: isDone ? "none" : `drop-shadow(0 0 ${isInProgress ? 6 : 3}px ${colors?.glow ?? "rgba(255,255,255,0.3)"})`,
+                  }}
+                />
+
+                {/* Priority indicator — small inner dot for high priority */}
+                {task.priority <= 2 && !isDone && (
+                  <circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={2}
+                    fill="#fff"
+                    opacity={0.9}
+                  />
+                )}
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* Tooltip */}
+        <AnimatePresence>
+          {hoveredTask && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.15 }}
+              className="pointer-events-none absolute z-50 max-w-xs rounded-lg border border-white/10 bg-black/90 px-4 py-3 font-mono text-xs shadow-2xl backdrop-blur-sm"
+              style={{
+                left: tooltipPos.x + 16,
+                top: tooltipPos.y - 8,
+              }}
+            >
+              <div className="mb-1 flex items-center gap-2">
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{
+                    background:
+                      PROJECT_COLORS[hoveredTask.project_id]?.accent ?? "#fff",
+                  }}
+                />
+                <span className="text-white/50">
+                  {MOCK_PROJECTS.find((p) => p.id === hoveredTask.project_id)
+                    ?.name ?? "—"}
+                </span>
+              </div>
+              <div className="mb-2 text-sm font-medium text-white">
+                {hoveredTask.title}
+              </div>
+              <div className="flex items-center gap-3 text-white/40">
+                <span
+                  className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${
+                    hoveredTask.status === "in_progress"
+                      ? "bg-white/10 text-white/70"
+                      : hoveredTask.status === "blocked"
+                        ? "bg-red-500/20 text-red-400"
+                        : hoveredTask.status === "done"
+                          ? "bg-white/5 text-white/30"
+                          : "bg-white/5 text-white/50"
+                  }`}
+                >
+                  {hoveredTask.status.replace("_", " ")}
+                </span>
+                {hoveredTask.due_date && (
+                  <span>due {hoveredTask.due_date}</span>
+                )}
+                {hoveredTask.estimated_hours && (
+                  <span>{hoveredTask.estimated_hours}h est</span>
+                )}
+              </div>
+              {hoveredTask.description && (
+                <div className="mt-2 border-t border-white/10 pt-2 text-white/30">
+                  {hoveredTask.description}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Unscheduled tasks — floating sidebar strip */}
+      {unscheduledTasks.length > 0 && (
+        <div className="absolute right-4 top-1/2 -translate-y-1/2">
+          <div className="rounded-lg border border-white/5 bg-white/[0.02] px-3 py-4 backdrop-blur-sm">
+            <div className="mb-3 text-center text-[10px] uppercase tracking-[0.2em] text-white/20">
+              Unscheduled
+            </div>
+            <div className="flex flex-col gap-2">
+              {unscheduledTasks.map((task) => {
+                const colors = PROJECT_COLORS[task.project_id];
+                return (
+                  <div
+                    key={task.id}
+                    className="group flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-white/5"
+                    onClick={() =>
+                      console.log("[Orbital] Unscheduled task clicked:", task.title)
+                    }
+                    title={task.title}
+                  >
+                    <span
+                      className="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style={{ background: colors?.accent }}
+                    />
+                    <span className="max-w-[120px] truncate text-[11px] text-white/40 group-hover:text-white/70">
+                      {task.title}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Status legend — bottom */}
+      <div className="flex items-center justify-center gap-6 py-3 text-[10px] uppercase tracking-[0.15em] text-white/20">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-white" />
+          In Progress
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-white/50" />
+          Todo
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-white/20" />
+          Done
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full"
+            style={{
+              border: "1px dashed rgba(239, 68, 68, 0.6)",
+              background: "transparent",
+            }}
+          />
+          Blocked
+        </span>
+        <span className="text-white/10">|</span>
+        <span className="text-white/15">scroll to zoom</span>
+      </div>
     </div>
   );
 }

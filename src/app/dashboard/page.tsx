@@ -42,13 +42,13 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-          Tasks
+    <div className="relative min-h-screen" style={{ background: "#0a0a0f" }}>
+      <div className="px-6 pt-6 pb-2">
+        <h1 className="font-mono text-2xl font-light tracking-[0.15em] text-white/80">
+          Orbital
         </h1>
-        <p className="mt-1 text-gray-600">
-          Weekly view of your tasks and projects
+        <p className="font-mono text-xs tracking-wider text-white/25">
+          Radial time-horizon task map — your tasks in orbit
         </p>
       </div>
 
@@ -61,9 +61,13 @@ export default async function DashboardPage() {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-4">
-      <div className="h-10 bg-gray-200 rounded animate-pulse" />
-      <div className="h-96 bg-gray-200 rounded animate-pulse" />
+    <div
+      className="flex min-h-[60vh] items-center justify-center"
+      style={{ background: "#0a0a0f" }}
+    >
+      <div className="font-mono text-xs tracking-wider text-white/20">
+        Initializing orbital field...
+      </div>
     </div>
   );
 }

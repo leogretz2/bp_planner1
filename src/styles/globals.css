@@ -4,3 +4,46 @@
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
+
+/* Orbital prototype — custom animations */
+@keyframes orbital-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.15); }
+}
+
+@keyframes orbital-glow {
+  0%, 100% { filter: drop-shadow(0 0 4px currentColor); }
+  50% { filter: drop-shadow(0 0 12px currentColor); }
+}
+
+@keyframes orbital-blocked-pulse {
+  0%, 100% { opacity: 0.8; stroke-dashoffset: 0; }
+  50% { opacity: 0.3; stroke-dashoffset: 10; }
+}
+
+@keyframes orbital-ring-rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.orbital-container {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+/* Subtle scanline effect for the radar/mission-control feel */
+.orbital-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.008) 2px,
+    rgba(255, 255, 255, 0.008) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
