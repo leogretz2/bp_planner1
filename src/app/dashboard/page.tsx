@@ -36,34 +36,25 @@ export default async function DashboardPage() {
           supabaseUser.email?.split("@")[0] ??
           "User",
         avatar_url: supabaseUser.user_metadata?.avatar_url ?? null,
-        role: "member", // Default role
+        role: "member",
       })
       .returning();
   }
 
   return (
-    <div className="container mx-auto p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-          Tasks
-        </h1>
-        <p className="mt-1 text-gray-600">
-          Weekly view of your tasks and projects
-        </p>
-      </div>
-
-      <Suspense fallback={<DashboardSkeleton />}>
-        <DashboardContent currentUser={currentUser} />
-      </Suspense>
-    </div>
+    <Suspense fallback={<TerminalLoading />}>
+      <DashboardContent currentUser={currentUser} />
+    </Suspense>
   );
 }
 
-function DashboardSkeleton() {
+function TerminalLoading() {
   return (
-    <div className="space-y-4">
-      <div className="h-10 bg-gray-200 rounded animate-pulse" />
-      <div className="h-96 bg-gray-200 rounded animate-pulse" />
+    <div
+      className="flex h-screen w-screen items-center justify-center font-mono"
+      style={{ background: "#0D0D0D", color: "#555" }}
+    >
+      Loading...
     </div>
   );
 }
