@@ -142,7 +142,11 @@ export function DashboardContent({ currentUser: _currentUser }: DashboardContent
 
   // Drag-and-drop
   const [drag, setDrag] = useState<DragState | null>(null);
-  const [dropTargetLane, setDropTargetLane] = useState<string | null>(null);
+  const [dragActive, setDragActive] = useState(false); // true once card moves past click threshold
+  // undefined = no drag, null = over backlog, string = lane key
+  const [dropTargetLane, setDropTargetLane] = useState<string | null | undefined>(undefined);
+  const dragHasMoved = useRef(false);
+  const dragStartScreen = useRef({ x: 0, y: 0 });
 
   // Data
   const dates = useMemo(() => getWeekDates(4), []);
@@ -195,22 +199,36 @@ export function DashboardContent({ currentUser: _currentUser }: DashboardContent
 
   const onPanEnd = useCallback(() => setIsPanning(false), []);
 
-  // ── Zoom ───────────────────────────────────────────────────────────────
+  // ── Wheel: Figma-style routing ─────────────────────────────────────────
+  // ctrlKey = true  → pinch gesture or Ctrl+scroll → zoom toward cursor
+  // ctrlKey = false → trackpad two-finger scroll or mouse wheel → pan
 
-  const onZoom = useCallback((e: React.WheelEvent) => {
+  const onWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     const el = containerRef.current;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    const factor = e.deltaY < 0 ? 1.08 : 0.92;
 
-    setTransform((prev) => {
-      const ns = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev.scale * factor));
-      const r = ns / prev.scale;
-      return { scale: ns, x: cx - (cx - prev.x) * r, y: cy - (cy - prev.y) * r };
-    });
+    if (e.ctrlKey) {
+      // Zoom toward cursor
+      const rect = el.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      // Pinch events have large fractional deltaY; scroll wheel gives ~100
+      const factor = e.deltaY < 0 ? 1.08 : 0.92;
+
+      setTransform((prev) => {
+        const ns = Math.min(MAX_SCALE, Math.max(MIN_SCALE, prev.scale * factor));
+        const r = ns / prev.scale;
+        return { scale: ns, x: cx - (cx - prev.x) * r, y: cy - (cy - prev.y) * r };
+      });
+    } else {
+      // Pan — deltaX for horizontal (trackpad swipe), deltaY for vertical
+      setTransform((prev) => ({
+        ...prev,
+        x: prev.x - e.deltaX,
+        y: prev.y - e.deltaY,
+      }));
+    }
   }, []);
 
   // ── Keyboard (minimal — Figma-style supplementary) ─────────────────────
@@ -268,6 +286,11 @@ export function DashboardContent({ currentUser: _currentUser }: DashboardContent
       const rect = el.getBoundingClientRect();
       const canvasPos = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
 
+      dragHasMoved.current = false;
+      dragStartScreen.current = { x: e.clientX, y: e.clientY };
+      setDragActive(false);
+      setDropTargetLane(undefined);
+
       setDrag({
         taskId: task.id,
         originLaneKey: task.due_date ?? task.start_date ?? null,
@@ -288,6 +311,16 @@ export function DashboardContent({ currentUser: _currentUser }: DashboardContent
     const onMove = (e: MouseEvent) => {
       const el = containerRef.current;
       if (!el) return;
+
+      // Only start visually dragging after moving 6px — distinguishes click from drag
+      if (!dragHasMoved.current) {
+        const dx = e.clientX - dragStartScreen.current.x;
+        const dy = e.clientY - dragStartScreen.current.y;
+        if (Math.sqrt(dx * dx + dy * dy) < 6) return;
+        dragHasMoved.current = true;
+        setDragActive(true);
+      }
+
       const rect = el.getBoundingClientRect();
       const canvasPos = screenToCanvas(e.clientX - rect.left, e.clientY - rect.top);
 
@@ -295,27 +328,26 @@ export function DashboardContent({ currentUser: _currentUser }: DashboardContent
         prev ? { ...prev, currentX: canvasPos.x, currentY: canvasPos.y } : null,
       );
 
-      // Determine drop target
-      const targetLane = findLaneAtPosition(canvasPos.x);
-      setDropTargetLane(targetLane);
+      setDropTargetLane(findLaneAtPosition(canvasPos.x));
     };
 
     const onUp = () => {
-      if (drag && dropTargetLane !== undefined) {
-        // Move the task to the new lane
+      // Only commit if the card actually moved to a new lane
+      if (drag && dragHasMoved.current && dropTargetLane !== undefined) {
         setTasks((prev) =>
           prev.map((t) => {
             if (t.id !== drag.taskId) return t;
             if (dropTargetLane === null) {
-              // Dropped on backlog
               return { ...t, due_date: null, start_date: null };
             }
             return { ...t, due_date: dropTargetLane };
           }),
         );
       }
+      dragHasMoved.current = false;
+      setDragActive(false);
       setDrag(null);
-      setDropTargetLane(null);
+      setDropTargetLane(undefined);
     };
 
     window.addEventListener("mousemove", onMove);
@@ -339,7 +371,7 @@ export function DashboardContent({ currentUser: _currentUser }: DashboardContent
       onMouseMove={onPanMove}
       onMouseUp={onPanEnd}
       onMouseLeave={onPanEnd}
-      onWheel={onZoom}
+      onWheel={onWheel}
     >
       {/* Transform layer */}
       <div
@@ -355,11 +387,12 @@ export function DashboardContent({ currentUser: _currentUser }: DashboardContent
           label="BACKLOG"
           x={BACKLOG_X}
           isToday={false}
-          isDropTarget={drag !== null && dropTargetLane === null}
+          isDropTarget={dragActive && dropTargetLane === null}
           tasks={backlog}
           viewMode={viewMode}
           selectedTaskId={selectedTaskId}
           dragTaskId={drag?.taskId ?? null}
+          dragActive={dragActive}
           onSelect={setSelectedTaskId}
           onDragStart={onDragStart}
         />
@@ -374,19 +407,20 @@ export function DashboardContent({ currentUser: _currentUser }: DashboardContent
               sublabel={fmtMonthDay(lane.date)}
               x={lane.x}
               isToday={isToday(lane.date)}
-              isDropTarget={drag !== null && dropTargetLane === lane.key}
+              isDropTarget={dragActive && dropTargetLane === lane.key}
               tasks={laneTasks}
               viewMode={viewMode}
               selectedTaskId={selectedTaskId}
               dragTaskId={drag?.taskId ?? null}
+              dragActive={dragActive}
               onSelect={setSelectedTaskId}
               onDragStart={onDragStart}
             />
           );
         })}
 
-        {/* Drag ghost — rendered in canvas space */}
-        {drag && <DragGhost drag={drag} tasks={tasks} />}
+        {/* Drag ghost — only shown after card has moved past click threshold */}
+        {drag && dragActive && <DragGhost drag={drag} tasks={tasks} />}
       </div>
 
       {/* HUD */}
@@ -414,6 +448,7 @@ function LaneColumn({
   viewMode,
   selectedTaskId,
   dragTaskId,
+  dragActive,
   onSelect,
   onDragStart,
 }: {
@@ -426,6 +461,7 @@ function LaneColumn({
   viewMode: ViewMode;
   selectedTaskId: string | null;
   dragTaskId: string | null;
+  dragActive: boolean;
   onSelect: (id: string | null) => void;
   onDragStart: (e: React.MouseEvent, task: MockTask) => void;
 }) {
@@ -529,7 +565,7 @@ function LaneColumn({
                     colors={colors}
                     viewMode={viewMode}
                     isSelected={selectedTaskId === task.id}
-                    isDragging={dragTaskId === task.id}
+                    isDragging={dragTaskId === task.id && dragActive}
                     onSelect={() => onSelect(task.id)}
                     onDragStart={(e) => onDragStart(e, task)}
                   />
